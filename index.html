@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
   <head>
@@ -7,13 +8,15 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
     <script>
+      // Browser environment compatibility shim
+      window.process = window.process || { env: {} };
+      
       tailwind.config = {
         theme: {
           extend: {
             fontFamily: {
               sans: ['"M PLUS Rounded 1c"', 'sans-serif'],
             },
-            // Animations removed to prevent UI flashing effect
           }
         }
       }
@@ -22,7 +25,6 @@
       body {
         font-family: 'M PLUS Rounded 1c', sans-serif;
       }
-      /* Custom scrollbar for better aesthetics */
       ::-webkit-scrollbar {
         width: 8px;
       }
