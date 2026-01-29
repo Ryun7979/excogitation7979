@@ -3,79 +3,42 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Quiz Master</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>AI Quiz Master Pro</title>
     <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@700;900&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body {
         font-family: 'M PLUS Rounded 1c', sans-serif;
-        background: linear-gradient(to bottom, #4facfe 0%, #00f2fe 100%);
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         margin: 0;
         overflow: hidden;
-        height: 100vh;
-      }
-      .mario-cloud {
-        position: absolute;
-        background: white;
-        border-radius: 50px;
-        opacity: 0.8;
-        z-index: -1;
-      }
-      .mario-cloud::after, .mario-cloud::before {
-        content: '';
-        position: absolute;
-        background: white;
-        border-radius: 50%;
-      }
-      .cloud-1 { width: 150px; height: 50px; top: 15%; left: 10%; animation: float 20s infinite linear; }
-      .cloud-2 { width: 200px; height: 60px; top: 25%; left: 60%; animation: float 25s infinite linear reverse; }
-      .cloud-3 { width: 120px; height: 40px; top: 60%; left: 80%; animation: float 18s infinite linear; }
-      
-      @keyframes float {
-        from { transform: translateX(-100px); }
-        to { transform: translateX(calc(100vw + 100px)); }
+        height: 100dvh;
+        user-select: none;
       }
 
       .glossy-card {
-        background: linear-gradient(180deg, #ffffff 0%, #e2e8f0 100%);
-        box-shadow: 0 10px 0 rgba(0, 0, 0, 0.1), inset 0 4px 0 rgba(255, 255, 255, 0.8);
-      }
-      
-      .selection-guide {
-        position: absolute;
-        width: 110%;
-        height: 110%;
-        border: 12px solid #fbbf24;
-        border-radius: 3rem;
-        top: -5%;
-        left: -5%;
-        pointer-events: none;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        box-shadow: 0 10px 0 rgba(0, 0, 0, 0.1), inset 0 4px 0 rgba(255, 255, 255, 0.9);
       }
 
-      .no-scrollbar::-webkit-scrollbar {
-        display: none;
-      }
-      .no-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
+      .game-screen {
+        background: #1a1a1a;
+        border: 8px solid #333;
+        box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
       }
 
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 8px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-track {
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.3);
-        border-radius: 10px;
-      }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-      * {
-        -webkit-tap-highlight-color: transparent;
-      }
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 10px; }
+
+      * { -webkit-tap-highlight-color: transparent; }
+
+      .stage-transition-enter { opacity: 0; transform: scale(0.9); }
+      .stage-transition-enter-active { opacity: 1; transform: scale(1); transition: all 300ms ease-out; }
     </style>
   <script type="importmap">
 {
@@ -94,9 +57,6 @@
 <link rel="stylesheet" href="/index.css">
 </head>
   <body>
-    <div class="mario-cloud cloud-1"></div>
-    <div class="mario-cloud cloud-2"></div>
-    <div class="mario-cloud cloud-3"></div>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

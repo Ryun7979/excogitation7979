@@ -27,12 +27,12 @@ export const ApiStatus: React.FC = () => {
           {isBusy ? (
             <>
               <Loader2 className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
-              <span className="text-[10px] font-black text-white uppercase tracking-tighter">AI Busy</span>
+              <span className="text-[10px] font-black text-white uppercase tracking-tighter">AIが考え中</span>
             </>
           ) : (
             <>
               <div className="w-2.5 h-2.5 bg-teal-400 rounded-full shadow-[0_0_8px_#2dd4bf] animate-pulse" />
-              <span className="text-[10px] font-black text-white/80 uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">AI Online</span>
+              <span className="text-[10px] font-black text-white/80 uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">AI 準備完了</span>
             </>
           )}
         </div>
@@ -44,7 +44,7 @@ export const ApiStatus: React.FC = () => {
           <span className="text-sm">
             {status.label} 
             {status.status === 'error' && status.remaining && (
-              <span className="ml-1">({status.remaining}s)</span>
+              <span className="ml-1">({status.remaining}秒)</span>
             )}
           </span>
         </div>
