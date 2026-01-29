@@ -4,43 +4,24 @@ import React from 'react';
 interface ProgressBarProps {
   current: number;
   total: number;
+  className?: string;
 }
 
-export const ProgressBar: React.FC<ProgressBarProps> = ({ current, total }) => {
+export const ProgressBar: React.FC<ProgressBarProps> = ({ current, total, className = '' }) => {
   const percentage = Math.min(100, (current / total) * 100);
 
   return (
-    <div className="w-full max-w-2xl mx-auto mb-12">
-      <div className="flex justify-between items-end text-stone-400 font-black mb-4 px-4">
-        <div className="flex items-baseline gap-2">
-           <span className="text-4xl text-stone-800 tracking-tighter">Q.{current}</span>
-           <span className="text-xl">/ {total}</span>
-        </div>
-        <span className="text-lg bg-white px-4 py-1 rounded-full shadow-sm border-2 border-stone-50">{Math.round(percentage)}%</span>
+    <div className={`w-full shrink-0 ${className}`}>
+      <div className="flex justify-between items-baseline text-white font-black mb-2 lg:mb-4 px-2 lg:px-6 drop-shadow-[0_2px_2px_rgba(0,0,0,0.5)]">
+         <span className="text-2xl sm:text-3xl lg:text-5xl italic tracking-tighter">STAGE {current}-{total}</span>
+         <span className="text-xl sm:text-2xl lg:text-4xl tabular-nums">{Math.round(percentage)}%</span>
       </div>
-      <div className="h-10 bg-white rounded-full overflow-hidden border-8 border-white shadow-xl">
+      <div className="h-8 lg:h-14 bg-stone-900/30 rounded-full overflow-hidden border-4 lg:border-[6px] border-white relative backdrop-blur-sm shadow-inner">
         <div 
-          className="h-full bg-yellow-400 transition-all duration-700 ease-[cubic-bezier(0.34,1.56,0.64,1)] rounded-full striped-bar shadow-inner"
+          className="h-full bg-gradient-to-r from-yellow-300 to-yellow-500 transition-all duration-700 ease-out shadow-[inset_0_2px_0_rgba(255,255,255,0.5)] border-r-2 lg:border-r-4 border-yellow-600"
           style={{ width: `${percentage}%` }}
         />
       </div>
-      <style>{`
-        .striped-bar {
-          background-image: linear-gradient(
-            45deg,
-            rgba(255, 255, 255, 0.2) 25%,
-            transparent 25%,
-            transparent 50%,
-            rgba(255, 255, 255, 0.2) 50%,
-            rgba(255, 255, 255, 0.2) 75%,
-            transparent 75%,
-            transparent
-          );
-          background-size: 30px 30px;
-          animation: slide 2s linear infinite;
-        }
-        @keyframes slide { from { background-position: 0 0; } to { background-position: 60px 0; } }
-      `}</style>
     </div>
   );
 };

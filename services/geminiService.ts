@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, QuizResult, TeacherType } from "../types";
 
 // --- Utility: Wait function ---
@@ -9,6 +9,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const MIN_REQUEST_INTERVAL = 4000; 
 let requestQueue = Promise.resolve();
 let lastRequestTime = 0;
+let isBusy = false;
 
 /**
  * Ensures API calls are made one at a time with a minimum interval.
@@ -19,11 +20,13 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
     const waitTime = Math.max(0, MIN_REQUEST_INTERVAL - (now - lastRequestTime));
     if (waitTime > 0) await sleep(waitTime);
     
+    isBusy = true;
     try {
       lastRequestTime = Date.now();
-      return await operation();
-    } catch (error) {
-      throw error;
+      const res = await operation();
+      return res;
+    } finally {
+      isBusy = false;
     }
   });
 
@@ -31,11 +34,7 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-const getApiKey = () => {
-  return process.env.API_KEY;
-};
-
-const quizSchema: Schema = {
+const quizSchema = {
   type: Type.ARRAY,
   items: {
     type: Type.OBJECT,
@@ -52,7 +51,6 @@ const quizSchema: Schema = {
 
 /**
  * Generates a quiz from images using Gemini.
- * Fixed: Added optional parameters previousQuestions and previousResults to match the 6-argument call in App.tsx.
  */
 export const generateQuizFromImages = async (
   files: File[], 
@@ -62,12 +60,7 @@ export const generateQuizFromImages = async (
   previousQuestions?: QuizQuestion[],
   previousResults?: QuizResult[]
 ): Promise<QuizQuestion[]> => {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("APIキーが未設定です。\n\nVercelのSettings > Environment Variables で 'API_KEY' を設定し、再デプロイしてください。");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   onProgress("画像を解析中...");
   const imageParts = await Promise.all(files.map(async (file) => {
@@ -85,7 +78,6 @@ export const generateQuizFromImages = async (
   let prompt = `あなたはベテラン教師です。提供された画像から、${teacherPrompt}${modePrompt}4択クイズを合計${TOTAL_QUESTIONS}問作成してください。
   JSON形式で、question, options(4つ), correctAnswerIndex(0-3), explanation, targetAge(推定対象学年)を含めてください。`;
 
-  // Handle review mode logic if previous question/result data is provided
   if (previousQuestions && previousResults) {
     const wrongQuestions = previousResults
       .filter(r => !r.isCorrect)
@@ -116,10 +108,7 @@ export const generateQuizFromImages = async (
 };
 
 export const generateDetailedExplanation = async (question: QuizQuestion): Promise<string> => {
-  const apiKey = getApiKey();
-  if (!apiKey) return "APIキーがないため解説を生成できません。";
-  
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   return queuedRequest(async () => {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -132,10 +121,7 @@ export const generateDetailedExplanation = async (question: QuizQuestion): Promi
 };
 
 export const generateAdvice = async (questions: QuizQuestion[], results: QuizResult[]): Promise<string> => {
-  const apiKey = getApiKey();
-  if (!apiKey) return "結果に基づいたアドバイスを生成するにはAPIキーが必要です。";
-
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const correctCount = results.filter(r => r.isCorrect).length;
   const prompt = `${TOTAL_QUESTIONS}問中${correctCount}問正解した生徒へ、優しく前向きなアドバイスを100文字以内で作成してください。`;
 
@@ -149,6 +135,8 @@ export const generateAdvice = async (questions: QuizQuestion[], results: QuizRes
 };
 
 export const getApiStatus = () => {
-    // 簡易的なステータスチェック（拡張可能）
+    if (isBusy) {
+        return { status: 'busy' as const, label: '考え中...' };
+    }
     return { status: 'ok' as const, label: '元気' };
 };

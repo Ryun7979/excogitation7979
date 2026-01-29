@@ -2,8 +2,8 @@
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'outline' | 'sky';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: 'primary' | 'game-yellow' | 'game-white' | 'game-orange' | 'danger' | 'pill-black';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
   fullWidth?: boolean;
 }
 
@@ -15,30 +15,28 @@ export const Button: React.FC<ButtonProps> = ({
   className = '',
   ...props 
 }) => {
-  const { disabled } = props;
-
-  const baseStyles = "font-black rounded-[2rem] transition-all duration-150 flex items-center justify-center gap-3 border-2 border-transparent active:translate-y-2 active:shadow-none focus:outline-none";
+  const baseStyles = "font-black transition-all duration-75 flex items-center justify-center gap-4 select-none transform active:translate-y-1 active:shadow-none whitespace-nowrap border-4 border-black/10";
   
   const variants = {
-    primary: "bg-indigo-500 text-white shadow-[0_10px_0_#4338ca] hover:bg-indigo-400",
-    secondary: "bg-yellow-400 text-stone-900 shadow-[0_10px_0_#ca8a04] hover:bg-yellow-300",
-    sky: "bg-sky-400 text-white shadow-[0_10px_0_#0284c7] hover:bg-sky-300",
-    success: "bg-teal-400 text-white shadow-[0_10px_0_#0d9488] hover:bg-teal-300",
-    danger: "bg-rose-400 text-white shadow-[0_10px_0_#e11d48] hover:bg-rose-300",
-    outline: "bg-white text-stone-600 border-stone-200 shadow-[0_10px_0_#e7e5e4] hover:bg-stone-50",
+    primary: "bg-sky-500 text-white shadow-[0_10px_0_#0369a1] hover:bg-sky-400",
+    'game-yellow': "bg-[#fcd34d] text-stone-800 shadow-[0_10px_0_#ca8a04] hover:bg-[#fde047]",
+    'game-white': "bg-white text-stone-600 shadow-[0_10px_0_#d6d3d1] hover:bg-stone-50",
+    'game-orange': "bg-[#f97316] text-white shadow-[0_12px_0_#9a3412] hover:bg-[#fb923c]",
+    'danger': "bg-rose-500 text-white shadow-[0_10px_0_#9f1239] hover:bg-rose-400",
+    'pill-black': "bg-stone-800 text-white shadow-[0_8px_0_#000] rounded-full px-12",
   };
 
   const sizes = {
-    sm: "px-6 py-3 text-lg", 
-    md: "px-8 py-4 text-xl",
-    lg: "px-10 py-6 text-2xl tracking-widest uppercase",
+    sm: "px-6 py-3 text-xl rounded-2xl", 
+    md: "px-10 py-5 text-3xl rounded-3xl",
+    lg: "px-14 py-8 text-5xl rounded-[3rem]",
+    xl: "px-20 py-10 text-6xl rounded-[4rem]",
   };
 
-  const colorStyle = disabled ? "bg-stone-200 text-stone-400 shadow-none translate-y-2 cursor-not-allowed" : variants[variant];
-  const widthStyle = fullWidth ? "w-full" : "";
+  const disabledStyle = props.disabled ? "opacity-50 grayscale cursor-not-allowed shadow-none translate-y-2" : "";
 
   return (
-    <button className={`${baseStyles} ${colorStyle} ${sizes[size]} ${widthStyle} ${className}`} {...props}>
+    <button className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${fullWidth ? 'w-full' : ''} ${disabledStyle} ${className}`} {...props}>
       {children}
     </button>
   );

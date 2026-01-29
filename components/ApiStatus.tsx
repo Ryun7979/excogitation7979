@@ -1,49 +1,54 @@
+
 import React, { useEffect, useState } from 'react';
-import { Activity, Battery, BatteryCharging, BatteryWarning, CheckCircle2 } from 'lucide-react';
+import { Battery, Loader2, AlertCircle } from 'lucide-react';
 import { getApiStatus } from '../services/geminiService';
 
 export const ApiStatus: React.FC = () => {
-  const [status, setStatus] = useState<{ status: 'ok' | 'warning' | 'error', label?: string, remaining?: number }>({ status: 'ok' });
+  const [status, setStatus] = useState<{ status: 'ok' | 'busy' | 'warning' | 'error', label?: string, remaining?: number }>({ status: 'ok' });
 
   useEffect(() => {
     const checkStatus = () => {
       setStatus(getApiStatus());
     };
     
-    // Check immediately and then every second
     checkStatus();
-    const interval = setInterval(checkStatus, 1000);
+    const interval = setInterval(checkStatus, 500); 
     
     return () => clearInterval(interval);
   }, []);
 
-  // Removed the early return so it is always visible
-
-  const getColor = () => {
-    if (status.status === 'error') return 'bg-rose-100 text-rose-600 border-rose-200';
-    if (status.status === 'warning') return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-    // Healthy state: subtle white/teal look
-    return 'bg-white/90 text-teal-600 border-teal-100 shadow-sm backdrop-blur-sm';
-  };
-
-  const getIcon = () => {
-    if (status.status === 'error') return <BatteryWarning className="w-5 h-5 animate-pulse" />;
-    if (status.status === 'warning') return <Battery className="w-5 h-5" />;
-    return <CheckCircle2 className="w-5 h-5" />;
-  };
+  const isHealthy = status.status === 'ok';
+  const isBusy = status.status === 'busy';
 
   return (
-    // Changed position to top-right (right-4) which is more standard for status indicators
-    <div className={`absolute top-4 right-4 z-20 flex items-center gap-2 px-4 py-2 rounded-full border-2 font-bold transition-all duration-300 ${getColor()}`}>
-      {getIcon()}
-      <span className="text-sm">
-        AIの調子: {status.label || '元気'} 
-        {status.status === 'error' && status.remaining && (
-            <span className="ml-1 font-black">
-                (あと{status.remaining}秒)
-            </span>
-        )}
-      </span>
+    <div className="fixed top-4 right-4 z-[100] flex flex-col items-end pointer-events-none">
+      {(isHealthy || isBusy) ? (
+        <div className="bg-stone-900/40 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-white/20 shadow-lg pointer-events-auto group transition-all hover:bg-stone-900/60">
+          {isBusy ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
+              <span className="text-[10px] font-black text-white uppercase tracking-tighter">AI Busy</span>
+            </>
+          ) : (
+            <>
+              <div className="w-2.5 h-2.5 bg-teal-400 rounded-full shadow-[0_0_8px_#2dd4bf] animate-pulse" />
+              <span className="text-[10px] font-black text-white/80 uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">AI Online</span>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border-4 font-black shadow-xl animate-bounce pointer-events-auto ${
+          status.status === 'error' ? 'bg-rose-500 text-white border-white' : 'bg-yellow-400 text-stone-800 border-white'
+        }`}>
+          {status.status === 'error' ? <AlertCircle className="w-5 h-5" /> : <Battery className="w-5 h-5" />}
+          <span className="text-sm">
+            {status.label} 
+            {status.status === 'error' && status.remaining && (
+              <span className="ml-1">({status.remaining}s)</span>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
