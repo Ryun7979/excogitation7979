@@ -259,7 +259,7 @@ const App: React.FC = () => {
   const renderPlaying = () => {
     const question = gameState.questions[gameState.currentQuestionIndex];
     return (
-      <div className="flex flex-col h-full w-full p-4 lg:p-10 overflow-hidden bg-gradient-to-b from-sky-400 via-sky-100 to-white relative">
+      <div className="flex flex-col h-full w-full p-4 lg:p-10 overflow-hidden bg-gradient-to-b from-white via-sky-100 to-sky-400 relative">
         <div className="absolute top-10 right-10 text-sky-300 opacity-20 pointer-events-none animate-pulse">
            <Sparkles size={120} />
         </div>
