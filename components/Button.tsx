@@ -15,7 +15,7 @@ export const Button: React.FC<ButtonProps> = ({
   className = '',
   ...props 
 }) => {
-  const baseStyles = "font-black transition-all duration-75 flex items-center justify-center gap-3 select-none transform active:translate-y-1 active:shadow-none whitespace-nowrap border-2 lg:border-4 border-black/10";
+  const baseStyles = "font-black transition-all duration-75 flex items-center justify-center gap-3 select-none transform active:translate-y-1 active:shadow-none whitespace-normal border-2 lg:border-4 border-black/10";
   
   const variants = {
     primary: "bg-sky-500 text-white shadow-[0_8px_0_#0369a1] hover:bg-sky-400",
