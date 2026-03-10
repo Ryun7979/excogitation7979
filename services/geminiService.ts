@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType } from "../types";
@@ -143,7 +144,7 @@ const resizeImage = async (file: File, maxWidth = 1024): Promise<string> => {
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx?.drawImage(img, 0, 0, width, height);
-      
+
       const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
       resolve(base64);
     };
@@ -152,7 +153,7 @@ const resizeImage = async (file: File, maxWidth = 1024): Promise<string> => {
 };
 
 // --- API Throttle & Queue Logic ---
-const MIN_REQUEST_INTERVAL = 4000; 
+const MIN_REQUEST_INTERVAL = 4000;
 let requestQueue = Promise.resolve();
 let lastRequestTime = 0;
 let isBusy = false;
@@ -162,7 +163,7 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
     const now = Date.now();
     const waitTime = Math.max(0, MIN_REQUEST_INTERVAL - (now - lastRequestTime));
     if (waitTime > 0) await sleep(waitTime);
-    
+
     isBusy = true;
     try {
       lastRequestTime = Date.now();
@@ -173,7 +174,7 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
     }
   });
 
-  requestQueue = result.then(() => {}).catch(() => {});
+  requestQueue = result.then(() => { }).catch(() => { });
   return result;
 }
 
@@ -195,13 +196,13 @@ const quizSchema = {
 };
 
 export const generateQuizFromImages = async (
-  files: File[], 
+  files: File[],
   mode: GameMode,
   teacher: TeacherType,
   onProgress: (message: string) => void
 ): Promise<QuizQuestion[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
   onProgress("画像を解析して遊び方を考えています...");
   const imageParts = await Promise.all(files.map(async (file) => {
     const base64 = await resizeImage(file);
@@ -209,8 +210,8 @@ export const generateQuizFromImages = async (
   }));
 
   const teacherStyle = teacher === TeacherType.AMANO ? "少し意地悪で応用力をためす" : "丁寧で基礎を重視した";
-  
-  const modeInstructions = mode === GameMode.STUDY 
+
+  const modeInstructions = mode === GameMode.STUDY
     ? `【べんきょうモード】
     - 目的: 学習内容の着実な理解と基礎知識の定着。
     - 内容: 画像内のテキスト、図表、数式、写真から読み取れる直接的な情報を問う。
@@ -270,10 +271,10 @@ export const generateAdvice = async (correctCount: number): Promise<string> => {
  * 特定の問題に対する詳細な解説を生成する
  */
 export const generateDetailedExplanation = async (question: QuizQuestion, teacher: TeacherType): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+
   const teacherContext = teacher === TeacherType.AMANO ? "厳しくも愛のある鋭い視点" : "優しく丁寧で、基礎から噛み砕いた視点";
-  
+
   const prompt = `以下のクイズ問題について、子供が納得できるように、なぜその答えになるのかを詳しく解説してください。
   
 【問題】: ${question.question}
@@ -297,8 +298,8 @@ export const generateDetailedExplanation = async (question: QuizQuestion, teache
 };
 
 export const getApiStatus = () => {
-    if (isBusy) {
-        return { status: 'busy' as const, label: 'AI思考中...' };
-    }
-    return { status: 'ok' as const, label: 'AI準備完了' };
+  if (isBusy) {
+    return { status: 'busy' as const, label: 'AI思考中...' };
+  }
+  return { status: 'ok' as const, label: 'AI準備完了' };
 };

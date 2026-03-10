@@ -75,7 +75,7 @@ const App: React.FC = () => {
     setGameState(prev => ({ ...prev, stage: AppStage.GENERATING, loadingMessage: "準備中..." }));
     try {
       const questions = await generateQuizFromImages(
-        gameState.images, 
+        gameState.images,
         gameState.mode,
         gameState.teacher,
         (msg) => setGameState(prev => ({ ...prev, loadingMessage: msg }))
@@ -90,7 +90,7 @@ const App: React.FC = () => {
   };
 
   const handleAnswer = (optionIndex: number) => {
-    if (selectedAnswer !== null) return; 
+    if (selectedAnswer !== null) return;
     setSelectedAnswer(optionIndex);
     const timeTaken = (Date.now() - startTime) / 1000;
     const isCorrect = optionIndex === gameState.questions[gameState.currentQuestionIndex].correctAnswerIndex;
@@ -99,7 +99,7 @@ const App: React.FC = () => {
       isCorrect,
       timeTakenSeconds: timeTaken,
     };
-    
+
     setTimeout(() => {
       setGameState(prev => ({
         ...prev,
@@ -128,7 +128,7 @@ const App: React.FC = () => {
   // 詳細解説を生成・表示する
   const handleShowDetailedExplanation = async () => {
     const currentQ = gameState.questions[gameState.currentQuestionIndex];
-    
+
     // キャッシュがあればそれを使う
     if (currentQ.detailedExplanation) {
       setActiveDetailedExplanation(currentQ.detailedExplanation);
@@ -140,14 +140,14 @@ const App: React.FC = () => {
     setIsDetailedModalOpen(true);
     try {
       const detail = await generateDetailedExplanation(currentQ, gameState.teacher);
-      
+
       // ステートの質問リスト内のデータを更新してキャッシュする
       const updatedQuestions = [...gameState.questions];
       updatedQuestions[gameState.currentQuestionIndex] = {
         ...currentQ,
         detailedExplanation: detail
       };
-      
+
       setGameState(prev => ({ ...prev, questions: updatedQuestions }));
       setActiveDetailedExplanation(detail);
     } catch (error) {
@@ -167,8 +167,8 @@ const App: React.FC = () => {
   };
 
   const renderTitle = () => (
-    <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden">
-      <div className="w-full lg:w-2/5 lg:max-w-[440px] bg-stone-900/10 backdrop-blur-xl p-6 lg:p-10 flex flex-col gap-6 shrink-0 border-b-2 lg:border-b-0 lg:border-r-4 border-white/20 overflow-y-auto custom-scrollbar">
+    <div className="flex flex-col lg:flex-row h-full w-full overflow-y-auto lg:overflow-hidden">
+      <div className="w-full lg:h-full lg:w-2/5 lg:max-w-[440px] bg-stone-900/10 backdrop-blur-xl p-6 lg:p-10 flex flex-col gap-6 shrink-0 border-b-2 lg:border-b-0 lg:border-r-4 border-white/20 overflow-visible lg:overflow-y-auto custom-scrollbar">
         <div className="space-y-1">
           <span className="text-white font-black opacity-40 text-sm tracking-widest uppercase italic">Config</span>
           <h1 className="text-4xl lg:text-6xl font-black text-white tracking-tighter drop-shadow-md">設定</h1>
@@ -210,19 +210,19 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
-      <div className="flex-1 flex flex-col p-6 lg:p-12 gap-6 overflow-hidden">
+      <div className="flex-1 flex flex-col p-6 lg:p-12 gap-6 min-h-[500px] lg:min-h-0 lg:overflow-hidden">
         <div className="flex justify-between items-end shrink-0">
           <div className="space-y-1">
-             <span className="text-white font-black opacity-40 text-lg tracking-widest uppercase italic">Import</span>
-             <h2 className="text-3xl lg:text-7xl font-black text-white drop-shadow-sm leading-none">写真を追加</h2>
+            <span className="text-white font-black opacity-40 text-lg tracking-widest uppercase italic">Import</span>
+            <h2 className="text-3xl lg:text-7xl font-black text-white drop-shadow-sm leading-none">写真を追加</h2>
           </div>
           <span className="text-white font-black opacity-50 text-sm lg:text-xl italic">MAX 10</span>
         </div>
-        <div className="flex-1 min-h-0 relative glossy-card rounded-[2.5rem] lg:rounded-[5rem] border-4 lg:border-8 border-white group overflow-hidden shadow-2xl">
-          <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 z-10 cursor-pointer" />
+        <label className="block flex-1 min-h-[300px] lg:min-h-0 relative glossy-card rounded-[2.5rem] lg:rounded-[5rem] border-4 lg:border-8 border-white group overflow-hidden shadow-2xl cursor-pointer hover:scale-[1.01] active:scale-[0.99] transition-transform">
+          <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
           {gameState.images.length === 0 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center pointer-events-none">
-              <Upload className="w-16 h-16 lg:w-32 lg:h-32 text-sky-500 mb-4" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+              <Upload className="w-16 h-16 lg:w-32 lg:h-32 text-sky-500 mb-4 group-hover:scale-110 transition-transform" />
               <p className="text-xl lg:text-5xl font-black text-stone-600">写真をえらんでね</p>
             </div>
           ) : (
@@ -234,18 +234,18 @@ const App: React.FC = () => {
                   </div>
                 ))}
               </div>
-              <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0">
-                <span className="text-white font-black text-lg lg:text-3xl">{gameState.images.length} 枚セット完了！</span>
+              <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0 flex items-center justify-center gap-2">
+                <span className="text-white font-black text-base md:text-lg lg:text-3xl">{gameState.images.length} 枚セット完了！（タップで変更）</span>
               </div>
             </div>
           )}
-        </div>
-        <div className="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 justify-between shrink-0">
+        </label>
+        <div className="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 justify-between shrink-0 pb-8 lg:pb-0">
           <p className="text-white text-lg lg:text-3xl font-black text-center sm:text-left drop-shadow-md">準備ができたらスタート！</p>
-          <Button 
-            variant="game-orange" 
-            size="lg" 
-            onClick={startGeneration} 
+          <Button
+            variant="game-orange"
+            size="lg"
+            onClick={startGeneration}
             disabled={gameState.images.length === 0}
             className="w-full sm:w-auto px-16 lg:px-40 rounded-full min-w-[280px] lg:min-w-[450px]"
           >
@@ -259,9 +259,9 @@ const App: React.FC = () => {
   const renderPlaying = () => {
     const question = gameState.questions[gameState.currentQuestionIndex];
     return (
-      <div className="flex flex-col h-full w-full p-4 lg:p-10 overflow-hidden bg-gradient-to-b from-white via-sky-100 to-sky-400 relative">
+      <div className="flex flex-col h-full w-full p-4 lg:p-10 overflow-y-auto md:overflow-hidden bg-gradient-to-b from-white via-sky-100 to-sky-400 relative">
         <div className="absolute top-10 right-10 text-sky-300 opacity-20 pointer-events-none animate-pulse">
-           <Sparkles size={120} />
+          <Sparkles size={120} />
         </div>
         <div className="flex items-center gap-4 lg:gap-6 mb-4 lg:mb-8 shrink-0 relative z-10">
           <Button variant="pill-black" size="sm" onClick={backToTitle} className="px-3 lg:px-4 py-1 lg:py-2 border-2 min-w-0 bg-white text-stone-800 shadow-[0_4px_0_#ccc]">
@@ -269,7 +269,7 @@ const App: React.FC = () => {
           </Button>
           <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} className="flex-1" />
         </div>
-        <div className="flex-1 min-h-0 bg-white/90 backdrop-blur-md border-4 lg:border-8 border-white rounded-[2.5rem] lg:rounded-[4rem] p-6 lg:p-12 flex items-center justify-center text-center mb-6 lg:mb-10 shadow-2xl overflow-y-auto custom-scrollbar relative z-10">
+        <div className="flex-1 md:min-h-0 shrink-0 md:shrink bg-white/90 backdrop-blur-md border-4 lg:border-8 border-white rounded-[2.5rem] lg:rounded-[4rem] p-6 lg:p-12 flex items-center justify-center text-center mb-6 lg:mb-10 shadow-2xl md:overflow-y-auto custom-scrollbar relative z-10">
           <h2 className="text-xl sm:text-3xl lg:text-6xl font-black text-stone-800 leading-tight max-w-5xl">
             {question.question}
           </h2>
@@ -302,35 +302,35 @@ const App: React.FC = () => {
       <div className={`flex flex-col h-full w-full items-center p-4 lg:p-10 transition-colors duration-500 ${isCorrect ? 'bg-teal-500' : 'bg-rose-500'}`}>
         <div className="w-full max-w-5xl glossy-card rounded-[2.5rem] lg:rounded-[4rem] overflow-hidden border-4 lg:border-8 border-white/80 p-6 lg:p-10 flex flex-col h-full shadow-2xl">
           <div className="text-center mb-4 shrink-0 flex items-center justify-center gap-4">
-             {isCorrect ? <Sparkles className="text-teal-400 w-8 h-8 lg:w-10 lg:h-10 animate-spin-slow" /> : null}
-             <h2 className={`text-3xl sm:text-5xl lg:text-8xl font-black italic drop-shadow-lg ${isCorrect ? 'text-teal-400' : 'text-rose-400'}`}>
+            {isCorrect ? <Sparkles className="text-teal-400 w-8 h-8 lg:w-10 lg:h-10 animate-spin-slow" /> : null}
+            <h2 className={`text-3xl sm:text-5xl lg:text-8xl font-black italic drop-shadow-lg ${isCorrect ? 'text-teal-400' : 'text-rose-400'}`}>
               {isCorrect ? 'せいかい！' : 'ざんねん...'}
             </h2>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 lg:gap-6 mb-6">
             <div className={`p-4 lg:p-6 rounded-[1.5rem] lg:rounded-[2.5rem] border-4 shrink-0 ${isCorrect ? 'bg-teal-50 border-teal-200' : 'bg-rose-50 border-rose-200'}`}>
-               <div className="flex items-center gap-2 mb-1 text-stone-400 uppercase font-black text-[10px] lg:text-sm tracking-widest">
-                 <Target size={16} /> 正解
-               </div>
-               <p className="text-lg lg:text-5xl font-black text-stone-800 leading-tight">
-                 {question.options[question.correctAnswerIndex]}
-               </p>
+              <div className="flex items-center gap-2 mb-1 text-stone-400 uppercase font-black text-[10px] lg:text-sm tracking-widest">
+                <Target size={16} /> 正解
+              </div>
+              <p className="text-lg lg:text-5xl font-black text-stone-800 leading-tight">
+                {question.options[question.correctAnswerIndex]}
+              </p>
             </div>
             <div className="flex-1 bg-white/60 p-5 lg:p-10 rounded-[1.5rem] lg:rounded-[3rem] border-4 border-white shadow-inner flex flex-col overflow-y-auto custom-scrollbar">
-               <div className="flex items-center gap-2 mb-2 lg:mb-4 text-sky-500 uppercase font-black text-[10px] lg:text-sm tracking-widest">
-                 <Info size={20} /> かいせつ
-               </div>
-               <p className="text-lg lg:text-4xl font-bold text-stone-700 leading-relaxed whitespace-pre-wrap">
-                 {question.explanation}
-               </p>
+              <div className="flex items-center gap-2 mb-2 lg:mb-4 text-sky-500 uppercase font-black text-[10px] lg:text-sm tracking-widest">
+                <Info size={20} /> かいせつ
+              </div>
+              <p className="text-lg lg:text-4xl font-bold text-stone-700 leading-relaxed whitespace-pre-wrap">
+                {question.explanation}
+              </p>
             </div>
           </div>
-          
+
           {/* アクションエリア */}
           <div className="mt-auto shrink-0 flex flex-col gap-3 lg:gap-4">
-            <Button 
-              variant={isCorrect ? "game-white" : "game-yellow"} 
-              size="md" 
+            <Button
+              variant={isCorrect ? "game-white" : "game-yellow"}
+              size="md"
               onClick={handleShowDetailedExplanation}
               disabled={isCorrect}
               className={`w-full rounded-full py-4 lg:py-6 text-lg lg:text-3xl !border-stone-200 transition-all ${isCorrect ? 'opacity-40 grayscale cursor-not-allowed shadow-none active:translate-y-0' : 'hover:scale-[1.02]'}`}
@@ -338,7 +338,7 @@ const App: React.FC = () => {
               <MessageCircle className="w-6 h-6 lg:w-10 lg:h-10" />
               <span>{isCorrect ? "（せいかいの人は押せません）" : "くわしい解説を見る！"}</span>
             </Button>
-            
+
             <Button variant="game-orange" size="lg" onClick={nextQuestion} className="w-full rounded-full py-4 lg:py-8 text-xl lg:text-5xl">
               {gameState.currentQuestionIndex + 1 >= TOTAL_QUESTIONS ? "結果を見る" : "つぎの問題へ"}
             </Button>
@@ -348,7 +348,7 @@ const App: React.FC = () => {
         {/* 詳細解説用ダイアログ（モーダル） */}
         {isDetailedModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-8">
-            <div 
+            <div
               className="absolute inset-0 bg-stone-900/60 backdrop-blur-md animate-in fade-in duration-300"
               onClick={() => !isGeneratingDetailed && setIsDetailedModalOpen(false)}
             />
@@ -359,7 +359,7 @@ const App: React.FC = () => {
                   <h3 className="text-2xl lg:text-5xl font-black">AI先生の特別じゅぎょう</h3>
                 </div>
                 {!isGeneratingDetailed && (
-                  <button 
+                  <button
                     onClick={() => setIsDetailedModalOpen(false)}
                     className="bg-white/20 hover:bg-white/40 p-2 lg:p-4 rounded-full text-white transition-colors"
                   >
@@ -367,7 +367,7 @@ const App: React.FC = () => {
                   </button>
                 )}
               </div>
-              
+
               <div className="flex-1 p-6 lg:p-12 overflow-y-auto custom-scrollbar bg-stone-50">
                 {isGeneratingDetailed ? (
                   <div className="flex flex-col items-center justify-center h-full gap-6 py-20">
@@ -384,11 +384,11 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
-              
+
               <div className="p-4 lg:p-8 bg-white border-t-2 border-stone-100 flex justify-center shrink-0">
-                <Button 
-                  variant="game-orange" 
-                  size="md" 
+                <Button
+                  variant="game-orange"
+                  size="md"
                   onClick={() => setIsDetailedModalOpen(false)}
                   disabled={isGeneratingDetailed}
                   className="px-12 lg:px-24 rounded-full"
@@ -416,89 +416,89 @@ const App: React.FC = () => {
 
         <div className="flex flex-col w-full h-full max-w-[1700px] mx-auto p-4 lg:p-10 relative z-10">
           <div className="flex justify-between items-center mb-4 lg:mb-8 shrink-0">
-             <div className="flex flex-col">
-                <span className="text-white/80 font-black text-lg lg:text-2xl tracking-[0.3em] uppercase italic">Victory Dashboard</span>
-                <h1 className="text-4xl lg:text-8xl font-black text-white italic tracking-tighter drop-shadow-2xl leading-none">チャレンジ結果</h1>
-             </div>
-             <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md px-6 py-3 rounded-full border border-white/20">
-                <Trophy className="text-yellow-400 w-8 h-8 lg:w-12 lg:h-12" />
-                <span className="text-white font-black text-xl lg:text-3xl">PERFECT CLEAR!</span>
-             </div>
+            <div className="flex flex-col">
+              <span className="text-white/80 font-black text-lg lg:text-2xl tracking-[0.3em] uppercase italic">Victory Dashboard</span>
+              <h1 className="text-4xl lg:text-8xl font-black text-white italic tracking-tighter drop-shadow-2xl leading-none">チャレンジ結果</h1>
+            </div>
+            <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md px-6 py-3 rounded-full border border-white/20">
+              <Trophy className="text-yellow-400 w-8 h-8 lg:w-12 lg:h-12" />
+              <span className="text-white font-black text-xl lg:text-3xl">PERFECT CLEAR!</span>
+            </div>
           </div>
 
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6 lg:gap-10">
             <div className="lg:w-[420px] flex flex-col gap-6 shrink-0 h-full">
               <div className="bg-white/15 backdrop-blur-3xl border-4 border-white/40 rounded-[3rem] p-8 lg:p-12 flex flex-col items-center justify-center shadow-2xl relative overflow-hidden flex-1 min-h-[220px]">
-                 <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent"></div>
-                 <div className="text-white/60 font-black text-sm lg:text-lg uppercase tracking-widest mb-2 relative z-10">Score</div>
-                 <div className="flex items-baseline gap-2 relative z-10">
-                    <span className="text-[7rem] lg:text-[10rem] font-black text-white leading-none tracking-tighter tabular-nums drop-shadow-xl">{correctCount}</span>
-                    <span className="text-3xl lg:text-5xl font-black text-white/30 italic">/10</span>
-                 </div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent"></div>
+                <div className="text-white/60 font-black text-sm lg:text-lg uppercase tracking-widest mb-2 relative z-10">Score</div>
+                <div className="flex items-baseline gap-2 relative z-10">
+                  <span className="text-[7rem] lg:text-[10rem] font-black text-white leading-none tracking-tighter tabular-nums drop-shadow-xl">{correctCount}</span>
+                  <span className="text-3xl lg:text-5xl font-black text-white/30 italic">/10</span>
+                </div>
               </div>
 
-              <div className="flex flex-col gap-4 lg:gap-5 pb-2 shrink-0">
-                 <Button 
-                   variant="game-orange" 
-                   size="lg" 
-                   onClick={startGeneration} 
-                   className="w-full rounded-[2rem] py-8 lg:py-10 text-2xl lg:text-4xl shadow-[0_12px_0_#9a3412]"
-                 >
-                   <Sparkles size={32} />
-                   <span>もういちど！</span>
-                 </Button>
-                 <Button 
-                   variant="game-white" 
-                   size="md" 
-                   onClick={backToTitle} 
-                   className="w-full rounded-[2rem] py-5 lg:py-7 text-xl lg:text-3xl border-white/20 text-stone-500 bg-white/90"
-                 >
-                   <RotateCcw size={28} />
-                   <span>おわる</span>
-                 </Button>
+              <div className="flex flex-col gap-6 lg:gap-5 pb-2 shrink-0">
+                <Button
+                  variant="game-orange"
+                  size="lg"
+                  onClick={startGeneration}
+                  className="w-full rounded-[2rem] py-8 lg:py-10 text-2xl lg:text-4xl shadow-[0_12px_0_#9a3412]"
+                >
+                  <Sparkles size={32} />
+                  <span>もういちど！</span>
+                </Button>
+                <Button
+                  variant="game-white"
+                  size="md"
+                  onClick={backToTitle}
+                  className="w-full rounded-[2rem] py-5 lg:py-7 text-xl lg:text-3xl border-white/20 text-stone-500 bg-white/90"
+                >
+                  <RotateCcw size={28} />
+                  <span>おわる</span>
+                </Button>
               </div>
             </div>
 
             <div className="flex-1 flex flex-col bg-white/95 rounded-[4rem] lg:rounded-[5rem] shadow-[0_30px_90px_-20px_rgba(0,0,0,0.5)] border-[8px] lg:border-[16px] border-white overflow-hidden relative">
-               <div className="bg-gradient-to-r from-sky-500 via-indigo-500 to-indigo-600 p-6 lg:p-10 shrink-0">
-                  <div className="flex items-center justify-between">
-                     <div className="flex items-center gap-4">
-                        <div className="bg-white/20 p-3 rounded-2xl">
-                           <Sparkles className="text-white w-8 h-8 lg:w-12 lg:h-12" />
-                        </div>
-                        <div>
-                           <h2 className="text-white font-black text-2xl lg:text-5xl tracking-tight">AI先生のアドバイス</h2>
-                           <p className="text-white/50 text-xs lg:text-sm font-bold uppercase tracking-[0.2em] mt-1">Special Advice from Teacher</p>
-                        </div>
-                     </div>
+              <div className="bg-gradient-to-r from-sky-500 via-indigo-500 to-indigo-600 p-6 lg:p-10 shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-white/20 p-3 rounded-2xl">
+                      <Sparkles className="text-white w-8 h-8 lg:w-12 lg:h-12" />
+                    </div>
+                    <div>
+                      <h2 className="text-white font-black text-2xl lg:text-5xl tracking-tight">AI先生のアドバイス</h2>
+                      <p className="text-white/50 text-xs lg:text-sm font-bold uppercase tracking-[0.2em] mt-1">Special Advice from Teacher</p>
+                    </div>
                   </div>
-               </div>
+                </div>
+              </div>
 
-               <div className="flex-1 p-8 lg:p-12 xl:p-16 flex items-center justify-center relative bg-stone-50/50 overflow-hidden">
-                  <span className="absolute top-4 left-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none pointer-events-none opacity-50">“</span>
-                  <div className="max-w-[1400px] w-full relative z-10 py-6">
-                     {gameState.advice ? (
-                        <p className="text-stone-800 font-black text-2xl lg:text-5xl xl:text-6xl leading-[1.1] text-center italic drop-shadow-sm px-4">
-                           {gameState.advice}
-                        </p>
-                     ) : (
-                        <div className="flex flex-col items-center gap-6">
-                           <Loader2 className="w-16 h-16 lg:w-24 lg:h-24 animate-spin text-sky-400" />
-                           <p className="text-2xl lg:text-4xl font-black text-stone-300 italic">準備中です...</p>
-                        </div>
-                     )}
-                  </div>
-                  <span className="absolute bottom-4 right-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none rotate-180 pointer-events-none opacity-50">“</span>
-               </div>
+              <div className="flex-1 p-8 lg:p-12 xl:p-16 flex items-center justify-center relative bg-stone-50/50 overflow-hidden">
+                <span className="absolute top-4 left-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none pointer-events-none opacity-50">“</span>
+                <div className="max-w-[1400px] w-full relative z-10 py-6">
+                  {gameState.advice ? (
+                    <p className="text-stone-800 font-black text-2xl lg:text-5xl xl:text-6xl leading-[1.1] text-center italic drop-shadow-sm px-4">
+                      {gameState.advice}
+                    </p>
+                  ) : (
+                    <div className="flex flex-col items-center gap-6">
+                      <Loader2 className="w-16 h-16 lg:w-24 lg:h-24 animate-spin text-sky-400" />
+                      <p className="text-2xl lg:text-4xl font-black text-stone-300 italic">準備中です...</p>
+                    </div>
+                  )}
+                </div>
+                <span className="absolute bottom-4 right-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none rotate-180 pointer-events-none opacity-50">“</span>
+              </div>
 
-               <div className="bg-stone-100/80 p-6 lg:p-10 flex flex-wrap items-center justify-center gap-8 lg:gap-16 border-t-2 border-stone-200 shrink-0">
-                  <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
-                     <Target size={28} className="lg:w-10 lg:h-10 text-sky-400" /> Accuracy: {correctCount * 10}%
-                  </div>
-                  <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
-                     <Star size={28} className="lg:w-10 lg:h-10 text-yellow-400" /> Grade: {correctCount >= 9 ? 'GOD' : correctCount >= 7 ? 'MASTER' : 'GOOD'}
-                  </div>
-               </div>
+              <div className="bg-stone-100/80 p-6 lg:p-10 flex flex-wrap items-center justify-center gap-8 lg:gap-16 border-t-2 border-stone-200 shrink-0">
+                <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
+                  <Target size={28} className="lg:w-10 lg:h-10 text-sky-400" /> Accuracy: {correctCount * 10}%
+                </div>
+                <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
+                  <Star size={28} className="lg:w-10 lg:h-10 text-yellow-400" /> Grade: {correctCount >= 9 ? 'GOD' : correctCount >= 7 ? 'MASTER' : 'GOOD'}
+                </div>
+              </div>
             </div>
           </div>
           <div className="h-2 lg:h-4 shrink-0"></div>
