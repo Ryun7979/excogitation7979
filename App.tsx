@@ -8,7 +8,7 @@ import { ProgressBar } from './components/ProgressBar';
 import { Modal } from './components/Modal';
 import { ApiStatus } from './components/ApiStatus';
 
-const MAX_IMAGES = 10;
+const MAX_IMAGES = 20;
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
@@ -216,7 +216,7 @@ const App: React.FC = () => {
             <span className="text-white font-black opacity-40 text-lg tracking-widest uppercase italic">Import</span>
             <h2 className="text-3xl lg:text-7xl font-black text-white drop-shadow-sm leading-none">写真を追加</h2>
           </div>
-          <span className="text-white font-black opacity-50 text-sm lg:text-xl italic">MAX 10</span>
+          <span className="text-white font-black opacity-50 text-sm lg:text-xl italic">MAX {MAX_IMAGES}</span>
         </div>
         <label className="block flex-1 min-h-[300px] lg:min-h-0 relative glossy-card rounded-[2.5rem] lg:rounded-[5rem] border-4 lg:border-8 border-white group overflow-hidden shadow-2xl cursor-pointer hover:scale-[1.01] active:scale-[0.99] transition-transform">
           <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -228,11 +228,17 @@ const App: React.FC = () => {
           ) : (
             <div className="absolute inset-0 bg-stone-50 flex flex-col h-full">
               <div className="flex-1 p-4 lg:p-6 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 lg:gap-4 overflow-y-auto custom-scrollbar">
-                {imageUrls.map((url, i) => (
+                {imageUrls.slice(0, 10).map((url, i) => (
                   <div key={i} className="aspect-square rounded-2xl lg:rounded-3xl border-2 lg:border-4 border-white shadow-lg overflow-hidden bg-white">
                     <img src={url} className="w-full h-full object-cover" alt="preview" />
                   </div>
                 ))}
+                {imageUrls.length > 10 && (
+                  <div className="aspect-square rounded-2xl lg:rounded-3xl border-2 lg:border-4 border-dashed border-sky-400 bg-sky-50/50 flex flex-col items-center justify-center text-sky-600 shadow-inner">
+                    <span className="text-2xl lg:text-4xl font-black">+{imageUrls.length - 10}</span>
+                    <span className="text-xs lg:text-sm font-bold">More</span>
+                  </div>
+                )}
               </div>
               <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0 flex items-center justify-center gap-2">
                 <span className="text-white font-black text-base md:text-lg lg:text-3xl">{gameState.images.length} 枚セット完了！（タップで変更）</span>
