@@ -118,7 +118,7 @@ const ADVICE_POOL: Record<number, string[]> = {
 };
 
 // --- Utility: Image Resizing for Token Optimization ---
-const resizeImage = async (file: File, maxWidth = 1024): Promise<string> => {
+const resizeImage = async (file: File, maxWidth = 512): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = URL.createObjectURL(file);
@@ -153,7 +153,7 @@ const resizeImage = async (file: File, maxWidth = 1024): Promise<string> => {
 };
 
 // --- API Throttle & Queue Logic ---
-const MIN_REQUEST_INTERVAL = 4000;
+const MIN_REQUEST_INTERVAL = 2000; // 安全のため2秒に調整
 let requestQueue = Promise.resolve();
 let lastRequestTime = 0;
 let isBusy = false;
@@ -236,7 +236,7 @@ ${modeInstructions}`;
   return queuedRequest(async () => {
     onProgress("AIがワクワクする問題を作成中...");
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest', // 元々動いていた確実な名前に戻します
       contents: { parts: [...imageParts, { text: prompt }] },
       config: {
         responseMimeType: "application/json",
@@ -290,7 +290,7 @@ export const generateDetailedExplanation = async (question: QuizQuestion, teache
 
   return queuedRequest(async () => {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash-latest',
       contents: prompt,
     });
     return response.text?.trim() || "解説の生成に失敗しました。もう一度試してみてね。";
