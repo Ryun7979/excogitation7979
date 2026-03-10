@@ -195,6 +195,13 @@ const quizSchema = {
   },
 };
 
+const FALLBACK_MODELS = [
+  'gemini-2.0-flash-lite',
+  'gemini-flash-latest',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+];
+
 export const generateQuizFromImages = async (
   files: File[],
   mode: GameMode,
@@ -235,26 +242,36 @@ ${modeInstructions}`;
 
   return queuedRequest(async () => {
     onProgress("AIがワクワクする問題を作成中...");
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest', // 元々動いていた確実な名前に戻します
-      contents: { parts: [...imageParts, { text: prompt }] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: quizSchema,
-      },
-    });
 
-    const text = response.text || "[]";
-    try {
-      const data = JSON.parse(text);
-      return data.map((q: any, i: number) => ({
-        ...q,
-        id: `q-${i}-${Date.now()}`
-      }));
-    } catch (e) {
-      console.error("JSON parse error:", text);
-      throw new Error("AIの応答を処理できませんでした。");
+    let lastError: any;
+    for (const modelName of FALLBACK_MODELS) {
+      try {
+        console.log(`Trying model: ${modelName}`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts: [...imageParts, { text: prompt }] },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: quizSchema,
+          },
+        });
+
+        const text = response.text || "[]";
+        const data = JSON.parse(text);
+        return data.map((q: any, i: number) => ({
+          ...q,
+          id: `q-${i}-${Date.now()}`
+        }));
+      } catch (e: any) {
+        lastError = e;
+        if (e?.status === 429 || e?.message?.includes('429')) {
+          console.warn(`Quota exceeded for ${modelName}, trying next fallback...`);
+          continue;
+        }
+        break; // 429以外は即座にエラーとする（JSONパースエラーなど）
+      }
     }
+    throw lastError || new Error("AIの応答を処理できませんでした。");
   });
 };
 
@@ -289,11 +306,23 @@ export const generateDetailedExplanation = async (question: QuizQuestion, teache
 4. 全体で300文字から500文字程度で、読みやすく改行を入れて作成してください。`;
 
   return queuedRequest(async () => {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-latest',
-      contents: prompt,
-    });
-    return response.text?.trim() || "解説の生成に失敗しました。もう一度試してみてね。";
+    let lastError: any;
+    for (const modelName of FALLBACK_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+        });
+        return response.text?.trim() || "解説の生成に失敗しました。もう一度試してみてね。";
+      } catch (e: any) {
+        lastError = e;
+        if (e?.status === 429 || e?.message?.includes('429')) {
+          continue;
+        }
+        break;
+      }
+    }
+    return "解説の生成に失敗しました（クォータ制限など）。";
   });
 };
 
