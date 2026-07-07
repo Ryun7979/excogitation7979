@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Upload, ChevronRight, ArrowLeft, Loader2, Star, BookOpen, Trophy, Info, Target, Sparkles, RotateCcw, MessageCircle, X } from 'lucide-react';
 import { AppStage, GameState, QuizResult, TOTAL_QUESTIONS, GameMode, TeacherType } from './types';
 import { generateQuizFromImages, generateAdvice, generateDetailedExplanation } from './services/geminiService';
@@ -24,6 +24,8 @@ const App: React.FC = () => {
 
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number>(0);
+  const answerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextQuestionLockRef = useRef(false);
   const [modalState, setModalState] = useState<{ isOpen: boolean; title: string; message: string; type: 'error' | 'info' | 'success' }>({
     isOpen: false, title: '', message: '', type: 'info'
   });
@@ -42,6 +44,13 @@ const App: React.FC = () => {
       imageUrls.forEach(url => URL.revokeObjectURL(url));
     };
   }, [imageUrls]);
+
+  // FEEDBACK画面に入るたびに「つぎの問題へ」の連打ロックを解除する
+  useEffect(() => {
+    if (gameState.stage === AppStage.FEEDBACK) {
+      nextQuestionLockRef.current = false;
+    }
+  }, [gameState.stage, gameState.currentQuestionIndex]);
 
   const showModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info') => {
     setModalState({ isOpen: true, title, message, type });
@@ -63,6 +72,10 @@ const App: React.FC = () => {
   };
 
   const backToTitle = () => {
+    if (answerTimeoutRef.current !== null) {
+      clearTimeout(answerTimeoutRef.current);
+      answerTimeoutRef.current = null;
+    }
     setGameState({
       stage: AppStage.TITLE,
       mode: GameMode.STUDY,
@@ -136,7 +149,8 @@ const App: React.FC = () => {
       timeTakenSeconds: timeTaken,
     };
 
-    setTimeout(() => {
+    answerTimeoutRef.current = setTimeout(() => {
+      answerTimeoutRef.current = null;
       setGameState(prev => {
         const srcIdx = currentQuestion.sourceImageIndex;
         const newStats = (!isCorrect && srcIdx !== undefined && prev.imageStats[srcIdx])
@@ -153,6 +167,8 @@ const App: React.FC = () => {
   };
 
   const nextQuestion = async () => {
+    if (nextQuestionLockRef.current) return;
+    nextQuestionLockRef.current = true;
     setSelectedAnswer(null);
     if (gameState.currentQuestionIndex + 1 >= TOTAL_QUESTIONS) {
       const correctCount = gameState.results.filter(r => r.isCorrect).length;
