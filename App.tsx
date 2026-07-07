@@ -8,7 +8,7 @@ import { ProgressBar } from './components/ProgressBar';
 import { Modal } from './components/Modal';
 import { ApiStatus } from './components/ApiStatus';
 
-const MAX_IMAGES = 20;
+const MAX_IMAGES = 50;
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
@@ -283,8 +283,11 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0 flex items-center justify-center gap-2">
+              <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0 flex flex-col items-center justify-center gap-1">
                 <span className="text-white font-black text-base md:text-lg lg:text-3xl">{gameState.images.length} 枚セット完了！（タップで変更）</span>
+                {gameState.images.length > 20 && (
+                  <span className="text-white/90 font-bold text-xs lg:text-base">たくさん選ぶと、だいじなページの問題が出にくくなるよ</span>
+                )}
               </div>
             </div>
           )}
