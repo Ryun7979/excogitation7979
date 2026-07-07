@@ -18,6 +18,12 @@ export enum TeacherType {
   AMANO = 'AMANO'
 }
 
+export interface ImageStat {
+  timesSelected: number;  // クイズ生成でAIに送信された回数
+  wrongCount: number;     // この画像から出た問題で間違えた回数
+  questionCount: number;  // この画像から作られた問題の累計数
+}
+
 export interface QuizQuestion {
   id: string;
   question: string;
@@ -26,6 +32,7 @@ export interface QuizQuestion {
   explanation: string; // The "point" of the question
   targetAge?: string; // Estimated target age/grade (e.g., "小学1年生", "中学生")
   detailedExplanation?: string; // Cached detailed explanation to avoid re-fetching
+  sourceImageIndex?: number; // この問題の元になった画像（元のimages配列に対するインデックス）
 }
 
 export interface QuizResult {
@@ -39,6 +46,7 @@ export interface GameState {
   mode: GameMode;
   teacher: TeacherType; // Selected teacher personality
   images: File[];
+  imageStats: ImageStat[]; // imagesと同じ長さ・並びの統計情報
   questions: QuizQuestion[];
   currentQuestionIndex: number;
   results: QuizResult[];
