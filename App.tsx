@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Upload, ChevronRight, ArrowLeft, Loader2, Star, BookOpen, Trophy, Info, Target, Sparkles, RotateCcw, MessageCircle, X } from 'lucide-react';
+import { Upload, ChevronRight, Loader2, Star, BookOpen, Trophy, Info, Target, Sparkles, RotateCcw, MessageCircle, X } from 'lucide-react';
 import { AppStage, GameState, QuizResult, TOTAL_QUESTIONS, GameMode, TeacherType } from './types';
 import { generateQuizFromImages, generateAdvice, generateDetailedExplanation } from './services/geminiService';
 import { Button } from './components/Button';
@@ -31,6 +31,7 @@ const App: React.FC = () => {
   });
 
   // 詳細解説用のステート
+  const [isQuitConfirmOpen, setIsQuitConfirmOpen] = useState(false);
   const [isDetailedModalOpen, setIsDetailedModalOpen] = useState(false);
   const [isGeneratingDetailed, setIsGeneratingDetailed] = useState(false);
   const [activeDetailedExplanation, setActiveDetailedExplanation] = useState("");
@@ -87,6 +88,7 @@ const App: React.FC = () => {
       results: [],
     });
     setSelectedAnswer(null);
+    setIsQuitConfirmOpen(false);
   };
 
   const startGeneration = async () => {
@@ -332,8 +334,8 @@ const App: React.FC = () => {
           <Sparkles size={120} />
         </div>
         <div className="flex items-center gap-4 lg:gap-6 mb-4 lg:mb-8 shrink-0 relative z-10">
-          <Button variant="pill-black" size="sm" onClick={backToTitle} className="px-3 lg:px-4 py-1 lg:py-2 border-2 min-w-0 bg-white text-stone-800 shadow-[0_4px_0_#ccc]">
-            <ArrowLeft className="w-5 h-5 lg:w-6 lg:h-6" />
+          <Button variant="pill-black" size="sm" onClick={() => setIsQuitConfirmOpen(true)} className="px-4 lg:px-5 py-1 lg:py-2 border-2 min-w-0 !bg-white !text-stone-800 shadow-[0_4px_0_#ccc]">
+            <span className="font-black text-sm lg:text-lg">やめる</span>
           </Button>
           <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} className="flex-1" />
         </div>
@@ -359,6 +361,41 @@ const App: React.FC = () => {
             </Button>
           ))}
         </div>
+
+        {isQuitConfirmOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-8">
+            <div
+              className="absolute inset-0 bg-stone-900/60 backdrop-blur-md animate-in fade-in duration-300"
+              onClick={() => setIsQuitConfirmOpen(false)}
+            />
+            <div className="relative w-full max-w-md bg-white rounded-[2rem] lg:rounded-[3rem] shadow-2xl border-4 lg:border-8 border-white p-6 lg:p-10 flex flex-col items-center text-center animate-in zoom-in duration-300">
+              <h3 className="text-xl lg:text-3xl font-black text-stone-800 mb-3 lg:mb-4">
+                やめますか？
+              </h3>
+              <p className="text-stone-500 font-bold text-sm lg:text-lg mb-6 lg:mb-8">
+                ここでやめると、さいしょからになるよ。
+              </p>
+              <div className="flex flex-col gap-3 w-full">
+                <Button
+                  variant="danger"
+                  size="md"
+                  onClick={backToTitle}
+                  className="w-full rounded-full py-3 lg:py-5 text-lg lg:text-2xl"
+                >
+                  やめる
+                </Button>
+                <Button
+                  variant="game-white"
+                  size="md"
+                  onClick={() => setIsQuitConfirmOpen(false)}
+                  className="w-full rounded-full py-3 lg:py-5 text-lg lg:text-2xl border-stone-200"
+                >
+                  つづける
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
