@@ -337,7 +337,7 @@ const App: React.FC = () => {
           <Button variant="pill-black" size="sm" onClick={() => setIsQuitConfirmOpen(true)} className="px-4 lg:px-5 py-1 lg:py-2 border-2 min-w-0 !bg-white !text-stone-800 shadow-[0_4px_0_#ccc]">
             <span className="font-black text-sm lg:text-lg">やめる</span>
           </Button>
-          <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} className="flex-1" />
+          <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} results={gameState.results} className="flex-1" />
         </div>
         <div className="flex-1 md:min-h-0 shrink-0 md:shrink bg-white/90 backdrop-blur-md border-4 lg:border-8 border-white rounded-[2.5rem] lg:rounded-[4rem] p-6 lg:p-12 flex items-center justify-center text-center mb-6 lg:mb-10 shadow-2xl md:overflow-y-auto custom-scrollbar relative z-10">
           <h2 className="text-xl sm:text-3xl lg:text-6xl font-black text-stone-800 leading-tight max-w-5xl">
