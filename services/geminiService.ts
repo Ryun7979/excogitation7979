@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType } from "../types";
+import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from "../types";
 
 // --- Static Advice Database (Pre-generated) ---
 const ADVICE_POOL: Record<number, string[]> = {
@@ -118,7 +118,7 @@ const ADVICE_POOL: Record<number, string[]> = {
 };
 
 // --- Utility: Image Resizing for Token Optimization ---
-const resizeImage = async (file: File, maxWidth = 512): Promise<string> => {
+const resizeImage = async (file: File, maxWidth = 400): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = URL.createObjectURL(file);
@@ -150,6 +150,50 @@ const resizeImage = async (file: File, maxWidth = 512): Promise<string> => {
     };
     img.onerror = reject;
   });
+};
+
+// --- Weighted Image Sampling ---
+// 1リクエストでAIに送る画像の上限
+const MAX_IMAGES_PER_REQUEST = 20;
+// 選択回数による重み減衰の強さ（大きいほど既出ページが選ばれにくくなる）
+const SELECTION_DECAY = 0.5;
+
+/**
+ * 画像統計をもとに重み付き非復元抽選で送信画像を選ぶ。
+ * 重み = (1 + wrongCount + 収穫率) ÷ (1 + SELECTION_DECAY × timesSelected)
+ * ベース1が常に残るため、どのページも選ばれる可能性を持ち続ける。
+ * @returns 元配列に対するインデックスの昇順配列
+ */
+export const selectImagesForQuiz = (
+  stats: ImageStat[],
+  maxCount: number = MAX_IMAGES_PER_REQUEST
+): number[] => {
+  if (stats.length <= maxCount) {
+    return stats.map((_, i) => i);
+  }
+
+  const weights = stats.map(s => {
+    const yieldRate = s.questionCount / Math.max(1, s.timesSelected);
+    return (1 + s.wrongCount + yieldRate) / (1 + SELECTION_DECAY * s.timesSelected);
+  });
+
+  const candidates = stats.map((_, i) => i);
+  const selected: number[] = [];
+  while (selected.length < maxCount && candidates.length > 0) {
+    const total = candidates.reduce((sum, idx) => sum + weights[idx], 0);
+    let r = Math.random() * total;
+    let pickPos = candidates.length - 1;
+    for (let p = 0; p < candidates.length; p++) {
+      r -= weights[candidates[p]];
+      if (r <= 0) {
+        pickPos = p;
+        break;
+      }
+    }
+    selected.push(candidates[pickPos]);
+    candidates.splice(pickPos, 1);
+  }
+  return selected.sort((a, b) => a - b);
 };
 
 // --- API Throttle & Queue Logic ---
