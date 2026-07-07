@@ -54,7 +54,11 @@ const App: React.FC = () => {
         showModal('枚数制限', `一度に${MAX_IMAGES}枚までだよ！`, 'error');
         return;
       }
-      setGameState(prev => ({ ...prev, images: files }));
+      setGameState(prev => ({
+        ...prev,
+        images: files,
+        imageStats: files.map(() => ({ timesSelected: 0, wrongCount: 0, questionCount: 0 })),
+      }));
     }
   };
 
@@ -76,13 +80,42 @@ const App: React.FC = () => {
     if (gameState.images.length === 0) return;
     setGameState(prev => ({ ...prev, stage: AppStage.GENERATING, loadingMessage: "準備中..." }));
     try {
-      const questions = await generateQuizFromImages(
+      const { questions, selectedIndices } = await generateQuizFromImages(
         gameState.images,
+        gameState.imageStats,
         gameState.mode,
         gameState.teacher,
         (msg) => setGameState(prev => ({ ...prev, loadingMessage: msg }))
       );
-      setGameState(prev => ({ ...prev, questions, stage: AppStage.PLAYING, currentQuestionIndex: 0, results: [] }));
+
+      // sourceImageIndexを「元のimages配列のインデックス」に正規化
+      const normalizedQuestions = questions.map(q => {
+        const raw = q.sourceImageIndex;
+        const isValid = typeof raw === 'number' && raw >= 0 && raw < selectedIndices.length;
+        return { ...q, sourceImageIndex: isValid ? selectedIndices[raw as number] : undefined };
+      });
+
+      setGameState(prev => {
+        const newStats = prev.imageStats.map((s, i) =>
+          selectedIndices.includes(i) ? { ...s, timesSelected: s.timesSelected + 1 } : s
+        );
+        normalizedQuestions.forEach(q => {
+          if (q.sourceImageIndex !== undefined && newStats[q.sourceImageIndex]) {
+            newStats[q.sourceImageIndex] = {
+              ...newStats[q.sourceImageIndex],
+              questionCount: newStats[q.sourceImageIndex].questionCount + 1,
+            };
+          }
+        });
+        return {
+          ...prev,
+          imageStats: newStats,
+          questions: normalizedQuestions,
+          stage: AppStage.PLAYING,
+          currentQuestionIndex: 0,
+          results: [],
+        };
+      });
       setStartTime(Date.now());
     } catch (error: any) {
       console.error(error);
@@ -95,7 +128,8 @@ const App: React.FC = () => {
     if (selectedAnswer !== null) return;
     setSelectedAnswer(optionIndex);
     const timeTaken = (Date.now() - startTime) / 1000;
-    const isCorrect = optionIndex === gameState.questions[gameState.currentQuestionIndex].correctAnswerIndex;
+    const currentQuestion = gameState.questions[gameState.currentQuestionIndex];
+    const isCorrect = optionIndex === currentQuestion.correctAnswerIndex;
     const newResult: QuizResult = {
       questionIndex: gameState.currentQuestionIndex,
       isCorrect,
@@ -103,11 +137,18 @@ const App: React.FC = () => {
     };
 
     setTimeout(() => {
-      setGameState(prev => ({
-        ...prev,
-        stage: AppStage.FEEDBACK,
-        results: [...prev.results, newResult]
-      }));
+      setGameState(prev => {
+        const srcIdx = currentQuestion.sourceImageIndex;
+        const newStats = (!isCorrect && srcIdx !== undefined && prev.imageStats[srcIdx])
+          ? prev.imageStats.map((s, i) => i === srcIdx ? { ...s, wrongCount: s.wrongCount + 1 } : s)
+          : prev.imageStats;
+        return {
+          ...prev,
+          stage: AppStage.FEEDBACK,
+          imageStats: newStats,
+          results: [...prev.results, newResult],
+        };
+      });
     }, 600);
   };
 

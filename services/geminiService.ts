@@ -234,8 +234,9 @@ const quizSchema = {
       correctAnswerIndex: { type: Type.INTEGER, description: "正解のインデックス(0-3)" },
       explanation: { type: Type.STRING, description: "解説文（100文字程度）" },
       targetAge: { type: Type.STRING, description: "推定対象学年" },
+      sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった画像の番号（送信された画像の0始まりインデックス）" },
     },
-    required: ["question", "options", "correctAnswerIndex", "explanation", "targetAge"],
+    required: ["question", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"],
   },
 };
 
@@ -246,16 +247,26 @@ const FALLBACK_MODELS = [
   'gemini-2.0-flash',
 ];
 
+export interface QuizGenerationResult {
+  questions: QuizQuestion[];
+  selectedIndices: number[]; // 元のimages配列に対するインデックス
+}
+
 export const generateQuizFromImages = async (
   files: File[],
+  stats: ImageStat[],
   mode: GameMode,
   teacher: TeacherType,
   onProgress: (message: string) => void
-): Promise<QuizQuestion[]> => {
+): Promise<QuizGenerationResult> => {
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
+  const selectedIndices = selectImagesForQuiz(stats);
+  console.log("Selected image indices for quiz:", selectedIndices);
+  const selectedFiles = selectedIndices.map(i => files[i]);
+
   onProgress("画像を解析して遊び方を考えています...");
-  const imageParts = await Promise.all(files.map(async (file) => {
+  const imageParts = await Promise.all(selectedFiles.map(async (file) => {
     const base64 = await resizeImage(file);
     return { inlineData: { data: base64, mimeType: "image/jpeg" } };
   }));
@@ -281,6 +292,7 @@ export const generateQuizFromImages = async (
 1. 【画像参照の禁止】: 独立したクイズとして成立させてください。
 2. 【言語】: 子供向けの楽しい日本語を使用。
 3. 【先生スタイル】: ${teacherStyle}性格で出題。
+4. 【元画像の明示】: 各問題について、その問題の元になった画像の番号（送信順で0始まり）をsourceImageIndexとして必ず含めてください。
 モード別指示:
 ${modeInstructions}`;
 
@@ -302,10 +314,11 @@ ${modeInstructions}`;
 
         const text = response.text || "[]";
         const data = JSON.parse(text);
-        return data.map((q: any, i: number) => ({
+        const questions = data.map((q: any, i: number) => ({
           ...q,
           id: `q-${i}-${Date.now()}`
         }));
+        return { questions, selectedIndices };
       } catch (e: any) {
         lastError = e;
         if (e?.status === 429 || e?.message?.includes('429')) {
