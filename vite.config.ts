@@ -7,6 +7,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    server: {
+      port: process.env.PORT ? Number(process.env.PORT) : 5173,
+      strictPort: false,
+    },
     define: {
       // ローカルの .env.local 等にある GEMINI_API_KEY か、Vercelの API_KEY を process.env.API_KEY としてコードに渡す
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || env.API_KEY)
