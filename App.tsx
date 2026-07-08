@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Upload, ChevronRight, Loader2, Star, BookOpen, Trophy, Info, Target, Sparkles, RotateCcw, MessageCircle, X } from 'lucide-react';
 import { AppStage, GameState, QuizResult, TOTAL_QUESTIONS, GameMode, TeacherType } from './types';
 import { generateQuizFromImages, generateAdvice, generateDetailedExplanation } from './services/geminiService';
+import { isRetryableApiError, describeApiError } from './services/retryPolicy';
 import { Button } from './components/Button';
 import { ProgressBar } from './components/ProgressBar';
 import { Modal } from './components/Modal';
@@ -135,7 +136,11 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error(error);
       setGameState(prev => ({ ...prev, stage: AppStage.TITLE }));
-      showModal('エラー', "クイズを作れませんでした。画像をかえて試してみてね。", 'error');
+      // 混雑・クォータ起因なら「待てば直る」ことを伝える
+      const friendly = isRetryableApiError(error)
+        ? "AIがこみあっているみたい。少し待ってから、もう一度ためしてね。"
+        : "クイズを作れませんでした。画像をかえて試してみてね。";
+      showModal('エラー', `${friendly}\n\n【原因】${describeApiError(error)}`, 'error');
     }
   };
 
@@ -213,7 +218,7 @@ const App: React.FC = () => {
       setActiveDetailedExplanation(detail);
     } catch (error) {
       console.error(error);
-      setActiveDetailedExplanation("ごめんね。AI先生が考えすぎてエラーになっちゃった。もう一度ボタンを押してみてね。");
+      setActiveDetailedExplanation(`ごめんね。AI先生が考えすぎてエラーになっちゃった。もう一度ボタンを押してみてね。\n\n【原因】${describeApiError(error)}`);
     } finally {
       setIsGeneratingDetailed(false);
     }

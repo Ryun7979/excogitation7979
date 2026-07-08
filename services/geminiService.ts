@@ -2,6 +2,20 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from "../types";
+import { isRetryableApiError, RetryableError, describeApiError } from "./retryPolicy";
+
+// ハングした要求はタイムアウトで切って次のフォールバックモデルに回す。
+// 注意: SDKのretryOptionsは使わない — 有効にするとエラーがAbortErrorに
+// 包み直されて元のステータス・メッセージが失われ、原因表示ができなくなる。
+// 混雑時のリトライは withModelFallback（自前）で行う。
+const AI_HTTP_OPTIONS = {
+  timeout: 45000,
+};
+
+const createAiClient = () => new GoogleGenAI({
+  apiKey: import.meta.env.VITE_GEMINI_API_KEY,
+  httpOptions: AI_HTTP_OPTIONS,
+});
 
 // --- Static Advice Database (Pre-generated) ---
 const ADVICE_POOL: Record<number, string[]> = {
@@ -247,6 +261,32 @@ const FALLBACK_MODELS = [
   'gemini-2.0-flash',
 ];
 
+// 混雑(503)等の一時的エラー時、モデルを替えながら最大2周まで再試行する
+const MAX_FALLBACK_ROUNDS = 2;
+const ROUND_BACKOFF_MS = 3000;
+
+async function withModelFallback<T>(
+  run: (modelName: string) => Promise<T>,
+  onRetry?: (modelName: string, e: unknown) => void
+): Promise<T> {
+  let lastError: unknown;
+  for (let round = 0; round < MAX_FALLBACK_ROUNDS; round++) {
+    if (round > 0) await sleep(ROUND_BACKOFF_MS * round);
+    for (const modelName of FALLBACK_MODELS) {
+      try {
+        return await run(modelName);
+      } catch (e) {
+        lastError = e;
+        // APIキー無効・不正リクエストなどはモデルを替えても無駄なので即エラー
+        if (!isRetryableApiError(e)) throw e;
+        console.warn(`${modelName} failed (${(e as any)?.message ?? e}), trying next fallback...`);
+        onRetry?.(modelName, e);
+      }
+    }
+  }
+  throw lastError ?? new Error("AIの応答を処理できませんでした。");
+}
+
 export interface QuizGenerationResult {
   questions: QuizQuestion[];
   selectedIndices: number[]; // 元のimages配列に対するインデックス
@@ -259,7 +299,7 @@ export const generateQuizFromImages = async (
   teacher: TeacherType,
   onProgress: (message: string) => void
 ): Promise<QuizGenerationResult> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = createAiClient();
 
   const selectedIndices = selectImagesForQuiz(stats);
   console.log("Selected image indices for quiz:", selectedIndices);
@@ -313,9 +353,8 @@ ${modeInstructions}`;
   return queuedRequest(async () => {
     onProgress("AIがワクワクする問題を作成中...");
 
-    let lastError: any;
-    for (const modelName of FALLBACK_MODELS) {
-      try {
+    return withModelFallback(
+      async (modelName) => {
         console.log(`Trying model: ${modelName}`);
         const response = await ai.models.generateContent({
           model: modelName,
@@ -328,21 +367,17 @@ ${modeInstructions}`;
 
         const text = response.text || "[]";
         const data = JSON.parse(text);
+        if (!Array.isArray(data) || data.length === 0) {
+          throw new RetryableError("AIの応答が空でした");
+        }
         const questions = data.map((q: any, i: number) => ({
           ...q,
           id: `q-${i}-${Date.now()}`
         }));
         return { questions, selectedIndices };
-      } catch (e: any) {
-        lastError = e;
-        if (e?.status === 429 || e?.message?.includes('429')) {
-          console.warn(`Quota exceeded for ${modelName}, trying next fallback...`);
-          continue;
-        }
-        break; // 429以外は即座にエラーとする（JSONパースエラーなど）
-      }
-    }
-    throw lastError || new Error("AIの応答を処理できませんでした。");
+      },
+      () => onProgress("AIがこみあっています。別ルートで再挑戦中...")
+    );
   });
 };
 
@@ -359,7 +394,7 @@ export const generateAdvice = async (correctCount: number): Promise<string> => {
  * 特定の問題に対する詳細な解説を生成する
  */
 export const generateDetailedExplanation = async (question: QuizQuestion, teacher: TeacherType): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+  const ai = createAiClient();
 
   const teacherContext = teacher === TeacherType.AMANO ? "厳しくも愛のある鋭い視点" : "優しく丁寧で、基礎から噛み砕いた視点";
 
@@ -377,23 +412,17 @@ export const generateDetailedExplanation = async (question: QuizQuestion, teache
 4. 全体で300文字から500文字程度で、読みやすく改行を入れて作成してください。`;
 
   return queuedRequest(async () => {
-    let lastError: any;
-    for (const modelName of FALLBACK_MODELS) {
-      try {
+    try {
+      return await withModelFallback(async (modelName) => {
         const response = await ai.models.generateContent({
           model: modelName,
           contents: prompt,
         });
         return response.text?.trim() || "解説の生成に失敗しました。もう一度試してみてね。";
-      } catch (e: any) {
-        lastError = e;
-        if (e?.status === 429 || e?.message?.includes('429')) {
-          continue;
-        }
-        break;
-      }
+      });
+    } catch (e) {
+      return `解説の生成に失敗しました。少し待ってからもう一度試してみてね。\n\n【原因】${describeApiError(e)}`;
     }
-    return "解説の生成に失敗しました（クォータ制限など）。";
   });
 };
 
