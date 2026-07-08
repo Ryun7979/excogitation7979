@@ -4,6 +4,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from "../types";
 import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
 import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
+import { getCachedAnalysis, setCachedAnalysis } from "./imageAnalysisCache";
 
 // ハングした要求はタイムアウトで切って次のフォールバックモデルに回す。
 // 注意: SDKのretryOptionsは使わない — 有効にするとエラーがAbortErrorに
@@ -303,23 +304,149 @@ export interface QuizGenerationResult {
   selectedIndices: number[]; // 元のimages配列に対するインデックス
 }
 
+// --- 2フェーズ生成（隠し機能・デフォルトON） ---
+// フェーズ1: 画像→テキスト要約（重い・画像込み）。File参照でキャッシュし、
+//   同じ画像は二度と解析しない。モデル切替リトライ・枚数を減らした再試行・
+//   「もういちど」再プレイのすべてでこのキャッシュが再利用される。
+// フェーズ2: テキスト要約→クイズ（軽い・画像なし）。失敗しても画像を送り直さず再試行できる。
+const analysisSchema = {
+  type: Type.ARRAY,
+  items: {
+    type: Type.OBJECT,
+    properties: {
+      summary: {
+        type: Type.STRING,
+        description: "画像の内容の詳しい日本語要約。学習テーマ、書かれている数値・語句・図表の内容を、画像を見なくても再現できるくらい具体的に書く"
+      },
+    },
+    required: ["summary"],
+  },
+};
+
+const buildAnalysisPrompt = (count: number) =>
+  `${count}枚の画像それぞれについて、内容を日本語で詳しく要約してください。
+書かれている文字・数値・図表・写真の内容をできるだけ正確に書き出し、学習テーマ（単元名など）も明記してください。
+後でこの要約だけを使ってクイズを作るので、画像を見なくても再現できるくらい具体的に書いてください。
+画像の送信順に、JSON配列で1画像1要素として返してください（配列の要素数は必ず${count}個）。`;
+
+async function generateQuizSinglePhase(
+  ai: GoogleGenAI,
+  attemptIndices: number[],
+  getResizedBase64: (fileIndex: number) => Promise<string>,
+  prompt: string,
+  modelName: string,
+): Promise<QuizQuestion[]> {
+  const imageParts = await Promise.all(attemptIndices.map(async i => ({
+    inlineData: { data: await getResizedBase64(i), mimeType: "image/jpeg" }
+  })));
+  const response = await ai.models.generateContent({
+    model: modelName,
+    contents: { parts: [...imageParts, { text: prompt }] },
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: quizSchema,
+      ...buildModelConfig(modelName),
+    },
+  });
+  const data = JSON.parse(response.text || "[]");
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new RetryableError("AIの応答が空でした");
+  }
+  return data.map((q: any, i: number) => ({ ...q, id: `q-${i}-${Date.now()}` }));
+}
+
+async function generateQuizTwoPhase(
+  ai: GoogleGenAI,
+  files: File[],
+  attemptIndices: number[],
+  getResizedBase64: (fileIndex: number) => Promise<string>,
+  prompt: string,
+  modelName: string,
+  onProgress: (message: string) => void,
+): Promise<QuizQuestion[]> {
+  const uncached = attemptIndices.filter(i => !getCachedAnalysis(files[i]));
+
+  if (uncached.length > 0) {
+    onProgress(
+      uncached.length === attemptIndices.length
+        ? "画像を解析しています..."
+        : `新しい画像だけ解析しています...(${uncached.length}枚)`
+    );
+    console.log(`Analyzing ${uncached.length}/${attemptIndices.length} images (rest reused from cache)`);
+    const imageParts = await Promise.all(uncached.map(async i => ({
+      inlineData: { data: await getResizedBase64(i), mimeType: "image/jpeg" }
+    })));
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: { parts: [...imageParts, { text: buildAnalysisPrompt(uncached.length) }] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: analysisSchema,
+        ...buildModelConfig(modelName),
+      },
+    });
+    const data = JSON.parse(response.text || "[]");
+    if (!Array.isArray(data) || data.length !== uncached.length) {
+      throw new RetryableError("画像解析の応答が不正でした");
+    }
+    uncached.forEach((fileIndex, pos) => {
+      const summary = data[pos]?.summary;
+      if (typeof summary === 'string' && summary.trim()) {
+        setCachedAnalysis(files[fileIndex], summary.trim());
+      }
+    });
+    if (uncached.some(i => !getCachedAnalysis(files[i]))) {
+      throw new RetryableError("画像解析結果が一部欠けていました");
+    }
+  } else {
+    console.log("All images already analyzed — reusing cached data, skipping image analysis");
+    onProgress("前回のデータを使って問題を作成中...");
+  }
+
+  onProgress("AIがワクワクする問題を作成中...");
+  const analysisBlock = attemptIndices
+    .map((fileIndex, pos) => `[画像${pos}]\n${getCachedAnalysis(files[fileIndex])}`)
+    .join('\n\n');
+  const response = await ai.models.generateContent({
+    model: modelName,
+    contents: `${analysisBlock}\n\n${prompt}`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: quizSchema,
+      ...buildModelConfig(modelName),
+    },
+  });
+  const data = JSON.parse(response.text || "[]");
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new RetryableError("AIの応答が空でした");
+  }
+  return data.map((q: any, i: number) => ({ ...q, id: `q-${i}-${Date.now()}` }));
+}
+
 export const generateQuizFromImages = async (
   files: File[],
   stats: ImageStat[],
   mode: GameMode,
   teacher: TeacherType,
-  onProgress: (message: string) => void
+  onProgress: (message: string) => void,
+  useFastRetry: boolean = true
 ): Promise<QuizGenerationResult> => {
   const ai = createAiClient();
 
   // 抽選順（優先度順）で受け取り、送信時に先頭N枚だけ使う（Nは混雑状況で増減）
   const drawnIndices = selectImagesForQuiz(stats);
-  console.log("Selected image indices for quiz:", drawnIndices);
+  console.log("Selected image indices for quiz:", drawnIndices, "fastRetry:", useFastRetry);
 
-  onProgress("画像を解析して遊び方を考えています...");
-  const resizedByDrawOrder = await Promise.all(
-    drawnIndices.map(i => resizeImage(files[i]))
-  );
+  // 画像リサイズは実際に送信が必要になった時点で行う（解析済みキャッシュがあれば不要）
+  const resizedCache = new Map<number, string>();
+  const getResizedBase64 = async (fileIndex: number): Promise<string> => {
+    let base64 = resizedCache.get(fileIndex);
+    if (!base64) {
+      base64 = await resizeImage(files[fileIndex]);
+      resizedCache.set(fileIndex, base64);
+    }
+    return base64;
+  };
 
   const teacherStyle = teacher === TeacherType.AMANO ? "少し厳しく、応用力を試す" : "丁寧で基礎を重視した";
 
@@ -361,7 +488,7 @@ export const generateQuizFromImages = async (
 ${modeInstructions}`;
 
   return queuedRequest(async () => {
-    onProgress("AIがワクワクする問題を作成中...");
+    onProgress("画像を解析して遊び方を考えています...");
 
     let sendCount = initialBatchSize(adaptiveMaxImages, drawnIndices.length);
 
@@ -373,31 +500,13 @@ ${modeInstructions}`;
           .slice(0, sendCount)
           .sort((a, b) => a.imageIndex - b.imageIndex);
         const attemptIndices = picked.map(p => p.imageIndex);
-        const imageParts = picked.map(p => ({
-          inlineData: { data: resizedByDrawOrder[p.drawPos], mimeType: "image/jpeg" }
-        }));
 
         console.log(`Trying model: ${modelName} (images: ${attemptIndices.length})`);
         const startedAt = Date.now();
-        const response = await ai.models.generateContent({
-          model: modelName,
-          contents: { parts: [...imageParts, { text: prompt }] },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: quizSchema,
-            ...buildModelConfig(modelName),
-          },
-        });
 
-        const text = response.text || "[]";
-        const data = JSON.parse(text);
-        if (!Array.isArray(data) || data.length === 0) {
-          throw new RetryableError("AIの応答が空でした");
-        }
-        const questions = data.map((q: any, i: number) => ({
-          ...q,
-          id: `q-${i}-${Date.now()}`
-        }));
+        const questions = useFastRetry
+          ? await generateQuizTwoPhase(ai, files, attemptIndices, getResizedBase64, prompt, modelName, onProgress)
+          : await generateQuizSinglePhase(ai, attemptIndices, getResizedBase64, prompt, modelName);
 
         // 速く成功したら次回は1段戻し、遅かったら今回の枚数を維持する
         adaptiveMaxImages = (Date.now() - startedAt < FAST_RESPONSE_MS)

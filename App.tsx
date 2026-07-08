@@ -4,6 +4,7 @@ import { Upload, ChevronRight, Loader2, Star, BookOpen, Trophy, Info, Target, Sp
 import { AppStage, GameState, QuizResult, TOTAL_QUESTIONS, GameMode, TeacherType } from './types';
 import { generateQuizFromImages, generateAdvice, generateDetailedExplanation } from './services/geminiService';
 import { isRetryableApiError, describeApiError } from './services/retryPolicy';
+import { isFastRetryEnabled, setFastRetryEnabled } from './services/featureFlags';
 import { Button } from './components/Button';
 import { ProgressBar } from './components/ProgressBar';
 import { Modal } from './components/Modal';
@@ -22,6 +23,16 @@ const App: React.FC = () => {
     currentQuestionIndex: 0,
     results: [],
   });
+
+  // 隠し機能: 画像解析結果を再利用して再試行を高速化する（デフォルトON）
+  const [fastRetryEnabled, setFastRetryEnabledState] = useState<boolean>(() => isFastRetryEnabled());
+  const toggleFastRetry = () => {
+    setFastRetryEnabledState(prev => {
+      const next = !prev;
+      setFastRetryEnabled(next);
+      return next;
+    });
+  };
 
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number>(0);
@@ -101,7 +112,8 @@ const App: React.FC = () => {
         gameState.imageStats,
         gameState.mode,
         gameState.teacher,
-        (msg) => setGameState(prev => ({ ...prev, loadingMessage: msg }))
+        (msg) => setGameState(prev => ({ ...prev, loadingMessage: msg })),
+        fastRetryEnabled
       );
 
       // sourceImageIndexを「元のimages配列のインデックス」に正規化
@@ -620,6 +632,18 @@ const App: React.FC = () => {
   return (
     <div className="h-full w-full select-none relative overflow-hidden bg-gradient-to-br from-[#4facfe] to-[#00f2fe]">
       <ApiStatus />
+      {gameState.stage === AppStage.TITLE && (
+        <button
+          onClick={toggleFastRetry}
+          title="高速リトライ"
+          aria-label={`高速リトライ機能を${fastRetryEnabled ? 'オフ' : 'オン'}にする（現在: ${fastRetryEnabled ? 'オン' : 'オフ'}）`}
+          className={`fixed bottom-3 left-3 z-[60] w-2.5 h-2.5 rounded-full transition-all duration-300 hover:scale-150 ${
+            fastRetryEnabled
+              ? 'bg-emerald-400/50 hover:bg-emerald-400 hover:shadow-[0_0_8px_rgba(52,211,153,0.8)]'
+              : 'bg-white/15 hover:bg-white/50'
+          }`}
+        />
+      )}
       <Modal isOpen={modalState.isOpen} onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))} title={modalState.title} message={modalState.message} type={modalState.type} />
       <div className="h-full w-full flex flex-col">
         {gameState.stage === AppStage.TITLE && renderTitle()}
