@@ -6,8 +6,21 @@ export class RetryableError extends Error { }
 
 const RETRYABLE_STATUS = [408, 429, 500, 502, 503, 504];
 
-// SDK のリトライ枯渇後は status を持たない Error になるため、メッセージでも判定する
-const RETRYABLE_MESSAGE = /\b(408|429|500|502|503|504)\b|overloaded|unavailable|resource[_ ]exhausted|deadline|timed?[ _]?out|retryable http error|fetch failed|network/i;
+// SDK のリトライ枯渇後は status を持たない Error になるため、メッセージでも判定する。
+// abort は SDK の httpOptions.timeout 発火時（AbortController経由）に出る
+const RETRYABLE_MESSAGE = /\b(408|429|500|502|503|504)\b|overloaded|unavailable|resource[_ ]exhausted|deadline|timed?[ _]?out|abort|retryable http error|fetch failed|network/i;
+
+// 「リクエストが重くて処理しきれない」可能性があるエラー（タイムアウト・過負荷・5xx）。
+// このときは送信画像を減らす価値がある。429（クォータ）や認証エラーは枚数と無関係
+const SLOWDOWN_MESSAGE = /\b(408|500|502|503|504)\b|overloaded|unavailable|deadline|timed?[ _]?out|abort/i;
+
+/** 送信データを軽くすれば成功しうる「遅い・重い」系のエラーか */
+export const isSlowdownError = (e: unknown): boolean => {
+  const err = e as { status?: unknown; message?: unknown } | null | undefined;
+  const status = typeof err?.status === 'number' ? err.status : undefined;
+  if (status !== undefined) return status === 408 || status >= 500;
+  return SLOWDOWN_MESSAGE.test(String(err?.message ?? ''));
+};
 
 /** エラーモーダル等に表示する、失敗理由の短い日本語説明を返す */
 export const describeApiError = (e: unknown): string => {
@@ -25,7 +38,7 @@ export const describeApiError = (e: unknown): string => {
   if (status !== undefined && status >= 500) {
     return `AIサーバー側で一時的なエラーが発生しました (${status})`;
   }
-  if (status === 408 || /timed?[ _]?out|deadline/i.test(msg)) {
+  if (status === 408 || /timed?[ _]?out|deadline|abort/i.test(msg)) {
     return '通信がタイムアウトしました';
   }
   if (/fetch failed|network/i.test(msg)) {

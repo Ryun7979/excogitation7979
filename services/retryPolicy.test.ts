@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isRetryableApiError, RetryableError, describeApiError } from './retryPolicy.ts';
+import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from './retryPolicy.ts';
 
 test('429（クォータ超過）はリトライ対象', () => {
   assert.equal(isRetryableApiError({ status: 429, message: 'RESOURCE_EXHAUSTED' }), true);
@@ -53,7 +53,36 @@ test('APIキー無効などその他のエラーはリトライしない', () =>
   assert.equal(isRetryableApiError(undefined), false);
 });
 
+test('タイムアウトによるAbortErrorはリトライ対象', () => {
+  // SDKのhttpOptions.timeoutはAbortController.abort()を使う
+  const abortError = new DOMException('The operation was aborted.', 'AbortError');
+  assert.equal(isRetryableApiError(abortError), true);
+});
+
+// --- isSlowdownError: 送信画像を減らす価値がある「重い/遅い」系エラーか ---
+
+test('isSlowdownError: タイムアウト・Abortは遅延系', () => {
+  assert.equal(isSlowdownError(new DOMException('The operation was aborted.', 'AbortError')), true);
+  assert.equal(isSlowdownError(new Error('Request timed out')), true);
+});
+
+test('isSlowdownError: 503（過負荷）・500系は遅延系', () => {
+  assert.equal(isSlowdownError({ status: 503, message: 'The model is overloaded.' }), true);
+  assert.equal(isSlowdownError({ status: 500, message: 'Internal error' }), true);
+});
+
+test('isSlowdownError: 429（クォータ）や認証エラーは遅延系ではない', () => {
+  assert.equal(isSlowdownError({ status: 429, message: 'RESOURCE_EXHAUSTED' }), false);
+  assert.equal(isSlowdownError({ status: 400, message: 'API key not valid.' }), false);
+  assert.equal(isSlowdownError(null), false);
+});
+
 // --- describeApiError: エラーモーダルに表示する原因説明 ---
+
+test('describeApiError: Abort（タイムアウト）が説明される', () => {
+  const abortError = new DOMException('The operation was aborted.', 'AbortError');
+  assert.match(describeApiError(abortError), /タイムアウト/);
+});
 
 test('describeApiError: 429は利用上限として説明される', () => {
   const desc = describeApiError({ status: 429, message: 'RESOURCE_EXHAUSTED: Quota exceeded' });

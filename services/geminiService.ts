@@ -2,7 +2,8 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from "../types";
-import { isRetryableApiError, RetryableError, describeApiError } from "./retryPolicy";
+import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
+import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
 
 // ハングした要求はタイムアウトで切って次のフォールバックモデルに回す。
 // 注意: SDKのretryOptionsは使わない — 有効にするとエラーがAbortErrorに
@@ -132,7 +133,9 @@ const ADVICE_POOL: Record<number, string[]> = {
 };
 
 // --- Utility: Image Resizing for Token Optimization ---
-const resizeImage = async (file: File, maxWidth = 400): Promise<string> => {
+// Geminiは縦横とも384px以下の画像を最小トークン数(258)で処理する。
+// 384を超えるとタイル分割されてトークン数が数倍になるため、384に収める
+const resizeImage = async (file: File, maxWidth = 384): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = URL.createObjectURL(file);
@@ -167,8 +170,8 @@ const resizeImage = async (file: File, maxWidth = 400): Promise<string> => {
 };
 
 // --- Weighted Image Sampling ---
-// 1リクエストでAIに送る画像の上限
-const MAX_IMAGES_PER_REQUEST = 20;
+// 1リクエストでAIに送る画像の上限（混雑時は段階的に減らす）
+const MAX_IMAGES_PER_REQUEST = IMAGE_BATCH_LEVELS[0];
 // 選択回数による重み減衰の強さ（大きいほど既出ページが選ばれにくくなる）
 const SELECTION_DECAY = 0.5;
 
@@ -176,16 +179,13 @@ const SELECTION_DECAY = 0.5;
  * 画像統計をもとに重み付き非復元抽選で送信画像を選ぶ。
  * 重み = (1 + wrongCount + 収穫率) ÷ (1 + SELECTION_DECAY × timesSelected)
  * ベース1が常に残るため、どのページも選ばれる可能性を持ち続ける。
- * @returns 元配列に対するインデックスの昇順配列
+ * @returns 抽選順のインデックス配列（先頭ほど優先度が高い）。
+ *          混雑時に先頭N枚へ切り詰めても重み付き抽選として成立する
  */
 export const selectImagesForQuiz = (
   stats: ImageStat[],
   maxCount: number = MAX_IMAGES_PER_REQUEST
 ): number[] => {
-  if (stats.length <= maxCount) {
-    return stats.map((_, i) => i);
-  }
-
   const weights = stats.map(s => {
     const yieldRate = s.questionCount / Math.max(1, s.timesSelected);
     return (1 + s.wrongCount + yieldRate) / (1 + SELECTION_DECAY * s.timesSelected);
@@ -207,7 +207,7 @@ export const selectImagesForQuiz = (
     selected.push(candidates[pickPos]);
     candidates.splice(pickPos, 1);
   }
-  return selected.sort((a, b) => a - b);
+  return selected;
 };
 
 // --- API Throttle & Queue Logic ---
@@ -261,6 +261,17 @@ const FALLBACK_MODELS = [
   'gemini-2.0-flash',
 ];
 
+// 2.5系はデフォルトで思考(thinking)が有効になり応答が大幅に遅くなるため無効化する。
+// 2.0系はthinkingConfig未対応（指定すると400エラー）のため付けない
+const buildModelConfig = (modelName: string) =>
+  modelName.includes('2.0') ? {} : { thinkingConfig: { thinkingBudget: 0 } };
+
+// 直近の成功/失敗から学習した「一度に送る画像枚数」（セッション中は維持）
+let adaptiveMaxImages = IMAGE_BATCH_LEVELS[0];
+
+// これより速く成功したら、次回は枚数を1段戻す
+const FAST_RESPONSE_MS = 20000;
+
 // 混雑(503)等の一時的エラー時、モデルを替えながら最大2周まで再試行する
 const MAX_FALLBACK_ROUNDS = 2;
 const ROUND_BACKOFF_MS = 3000;
@@ -301,15 +312,14 @@ export const generateQuizFromImages = async (
 ): Promise<QuizGenerationResult> => {
   const ai = createAiClient();
 
-  const selectedIndices = selectImagesForQuiz(stats);
-  console.log("Selected image indices for quiz:", selectedIndices);
-  const selectedFiles = selectedIndices.map(i => files[i]);
+  // 抽選順（優先度順）で受け取り、送信時に先頭N枚だけ使う（Nは混雑状況で増減）
+  const drawnIndices = selectImagesForQuiz(stats);
+  console.log("Selected image indices for quiz:", drawnIndices);
 
   onProgress("画像を解析して遊び方を考えています...");
-  const imageParts = await Promise.all(selectedFiles.map(async (file) => {
-    const base64 = await resizeImage(file);
-    return { inlineData: { data: base64, mimeType: "image/jpeg" } };
-  }));
+  const resizedByDrawOrder = await Promise.all(
+    drawnIndices.map(i => resizeImage(files[i]))
+  );
 
   const teacherStyle = teacher === TeacherType.AMANO ? "少し厳しく、応用力を試す" : "丁寧で基礎を重視した";
 
@@ -353,15 +363,29 @@ ${modeInstructions}`;
   return queuedRequest(async () => {
     onProgress("AIがワクワクする問題を作成中...");
 
+    let sendCount = initialBatchSize(adaptiveMaxImages, drawnIndices.length);
+
     return withModelFallback(
       async (modelName) => {
-        console.log(`Trying model: ${modelName}`);
+        // 抽選順の先頭 sendCount 枚を、ページ順に並べ替えて送信する
+        const picked = drawnIndices
+          .map((imageIndex, drawPos) => ({ imageIndex, drawPos }))
+          .slice(0, sendCount)
+          .sort((a, b) => a.imageIndex - b.imageIndex);
+        const attemptIndices = picked.map(p => p.imageIndex);
+        const imageParts = picked.map(p => ({
+          inlineData: { data: resizedByDrawOrder[p.drawPos], mimeType: "image/jpeg" }
+        }));
+
+        console.log(`Trying model: ${modelName} (images: ${attemptIndices.length})`);
+        const startedAt = Date.now();
         const response = await ai.models.generateContent({
           model: modelName,
           contents: { parts: [...imageParts, { text: prompt }] },
           config: {
             responseMimeType: "application/json",
             responseSchema: quizSchema,
+            ...buildModelConfig(modelName),
           },
         });
 
@@ -374,9 +398,25 @@ ${modeInstructions}`;
           ...q,
           id: `q-${i}-${Date.now()}`
         }));
-        return { questions, selectedIndices };
+
+        // 速く成功したら次回は1段戻し、遅かったら今回の枚数を維持する
+        adaptiveMaxImages = (Date.now() - startedAt < FAST_RESPONSE_MS)
+          ? stepUp(sendCount)
+          : sendCount;
+
+        return { questions, selectedIndices: attemptIndices };
       },
-      () => onProgress("AIがこみあっています。別ルートで再挑戦中...")
+      (_modelName, e) => {
+        // タイムアウト・過負荷なら送信枚数を1段減らして軽くする（最低5枚）
+        const reduced = stepDown(sendCount);
+        if (isSlowdownError(e) && reduced < sendCount) {
+          sendCount = reduced;
+          adaptiveMaxImages = reduced;
+          onProgress(`画像を${reduced}枚にへらして再挑戦中...`);
+        } else {
+          onProgress("AIがこみあっています。別ルートで再挑戦中...");
+        }
+      }
     );
   });
 };
@@ -417,6 +457,7 @@ export const generateDetailedExplanation = async (question: QuizQuestion, teache
         const response = await ai.models.generateContent({
           model: modelName,
           contents: prompt,
+          config: buildModelConfig(modelName),
         });
         return response.text?.trim() || "解説の生成に失敗しました。もう一度試してみてね。";
       });
