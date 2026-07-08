@@ -185,6 +185,35 @@ const App: React.FC = () => {
     }, 600);
   };
 
+  // 出題ずみの問題インジケータをタップして、その問題からやり直す
+  const jumpToQuestion = (index: number) => {
+    if (index >= gameState.currentQuestionIndex) return;
+    if (answerTimeoutRef.current !== null) {
+      clearTimeout(answerTimeoutRef.current);
+      answerTimeoutRef.current = null;
+    }
+    const undoneResults = gameState.results.slice(index);
+    setGameState(prev => {
+      const revertedStats = prev.imageStats.map(s => ({ ...s }));
+      undoneResults.forEach(r => {
+        if (r.isCorrect) return;
+        const srcIdx = prev.questions[r.questionIndex]?.sourceImageIndex;
+        if (srcIdx !== undefined && revertedStats[srcIdx]) {
+          revertedStats[srcIdx] = { ...revertedStats[srcIdx], wrongCount: Math.max(0, revertedStats[srcIdx].wrongCount - 1) };
+        }
+      });
+      return {
+        ...prev,
+        stage: AppStage.PLAYING,
+        currentQuestionIndex: index,
+        results: prev.results.slice(0, index),
+        imageStats: revertedStats,
+      };
+    });
+    setSelectedAnswer(null);
+    setStartTime(Date.now());
+  };
+
   const nextQuestion = async () => {
     if (nextQuestionLockRef.current) return;
     nextQuestionLockRef.current = true;
@@ -354,7 +383,7 @@ const App: React.FC = () => {
           <Button variant="pill-black" size="sm" onClick={() => setIsQuitConfirmOpen(true)} className="px-4 lg:px-5 py-1 lg:py-2 border-2 min-w-0 !bg-white !text-stone-800 shadow-[0_4px_0_#ccc]">
             <span className="font-black text-sm lg:text-lg">やめる</span>
           </Button>
-          <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} results={gameState.results} className="flex-1" />
+          <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} results={gameState.results} onSelectQuestion={jumpToQuestion} className="flex-1" />
         </div>
         <div className="flex-1 md:min-h-0 shrink-0 md:shrink bg-white/90 backdrop-blur-md border-4 lg:border-8 border-white rounded-[2.5rem] lg:rounded-[4rem] p-6 lg:p-12 flex items-center justify-center text-center mb-6 lg:mb-10 shadow-2xl md:overflow-y-auto custom-scrollbar relative z-10">
           <h2 className="text-xl sm:text-3xl lg:text-6xl font-black text-stone-800 leading-tight max-w-5xl">
@@ -639,8 +668,8 @@ const App: React.FC = () => {
           aria-label={`高速リトライ機能を${fastRetryEnabled ? 'オフ' : 'オン'}にする（現在: ${fastRetryEnabled ? 'オン' : 'オフ'}）`}
           className={`fixed bottom-3 left-3 z-[60] w-2.5 h-2.5 rounded-full transition-all duration-300 hover:scale-150 ${
             fastRetryEnabled
-              ? 'bg-emerald-400/50 hover:bg-emerald-400 hover:shadow-[0_0_8px_rgba(52,211,153,0.8)]'
-              : 'bg-white/15 hover:bg-white/50'
+              ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] hover:shadow-[0_0_10px_rgba(52,211,153,1)]'
+              : 'bg-slate-800/80 hover:bg-slate-800'
           }`}
         />
       )}
