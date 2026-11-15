@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from "../types";
 import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
 import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
@@ -255,17 +255,23 @@ const quizSchema = {
   },
 };
 
+// 2.0系は提供終了(404)。'-latest'系エイリアスは中身が勝手に変わり、応答が返らないこともあるため
+// バージョン固定名を使う。世代(3.5/2.5)を交互に並べ、片方の混雑時にもう片方へ逃がす
 const FALLBACK_MODELS = [
-  'gemini-2.0-flash-lite',
-  'gemini-flash-latest',
+  'gemini-3.5-flash-lite',
   'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
 ];
 
-// 2.5系はデフォルトで思考(thinking)が有効になり応答が大幅に遅くなるため無効化する。
-// 2.0系はthinkingConfig未対応（指定すると400エラー）のため付けない
+// 思考(thinking)は応答を大幅に遅くするため最小にする。指定方法は世代で異なり、
+// 間違えると400エラー（リトライ対象外）で即失敗するので注意:
+// - 3系: thinkingBudget:0 は400になる → thinkingLevel を最小(MINIMAL)に
+// - 2.5系: thinkingBudget:0 で無効化
 const buildModelConfig = (modelName: string) =>
-  modelName.includes('2.0') ? {} : { thinkingConfig: { thinkingBudget: 0 } };
+  /gemini-3/.test(modelName)
+    ? { thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL } }
+    : { thinkingConfig: { thinkingBudget: 0 } };
 
 // 直近の成功/失敗から学習した「一度に送る画像枚数」（セッション中は維持）
 let adaptiveMaxImages = IMAGE_BATCH_LEVELS[0];
