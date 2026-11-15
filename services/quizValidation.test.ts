@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -54,4 +54,26 @@ test('sanitizeQuestions: 解説が欠けていたら空文字で補う', () => {
 test('sanitizeQuestions: 配列以外なら空配列', () => {
   assert.deepEqual(sanitizeQuestions({}, 10), []);
   assert.deepEqual(sanitizeQuestions(null, 10), []);
+});
+
+test('shuffleOptions: 並べ替えても正解の選択肢は同じ', () => {
+  const q = { ...valid(0), options: ['正解', 'B', 'C', 'D'], correctAnswerIndex: 0 };
+  for (let seed = 0; seed < 20; seed++) {
+    let x = seed;
+    const rand = () => ((x = (x * 9301 + 49297) % 233280) / 233280);
+    const out = shuffleOptions(q, rand);
+    assert.equal(out.options[out.correctAnswerIndex], '正解');
+    assert.deepEqual([...out.options].sort(), [...q.options].sort());
+  }
+});
+
+test('shuffleOptions: 正解の位置がばらける', () => {
+  const q = { ...valid(0), options: ['正解', 'B', 'C', 'D'], correctAnswerIndex: 0 };
+  const positions = new Set(Array.from({ length: 200 }, () => shuffleOptions(q).correctAnswerIndex));
+  assert.equal(positions.size, 4);
+});
+
+test('shuffleOptions: 「すべて」等を含む問題は並べ替えない', () => {
+  const q = { ...valid(0), options: ['A', 'B', 'C', 'すべて正しい'], correctAnswerIndex: 3 };
+  assert.deepEqual(shuffleOptions(q), q);
 });

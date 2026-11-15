@@ -21,6 +21,31 @@ export const isPlayableQuestion = (q: any): boolean =>
   q.correctAnswerIndex >= 0 &&
   q.correctAnswerIndex < OPTION_COUNT;
 
+// 「すべて正しい」「上のどれでもない」など、選択肢の位置や他の選択肢に依存するもの。
+// これを含む問題は並べ替えると意味が崩れるので、そのままにする
+const POSITION_DEPENDENT_OPTION = /すべて|全部|ぜんぶ|どれも|いずれも|以上|上の|両方|りょうほう/;
+
+/**
+ * 選択肢をシャッフルし、正解インデックスを付け替える。
+ * AIは正解を1番目・2番目に置きがちで、位置から答えが読めてしまうため。
+ */
+export const shuffleOptions = <Q extends { options: string[]; correctAnswerIndex: number }>(
+  q: Q,
+  random: () => number = Math.random
+): Q => {
+  if (q.options.some(o => POSITION_DEPENDENT_OPTION.test(o))) return q;
+  const order = q.options.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return {
+    ...q,
+    options: order.map(i => q.options[i]),
+    correctAnswerIndex: order.indexOf(q.correctAnswerIndex),
+  };
+};
+
 /**
  * 出題可能な問題だけを先頭から最大 total 問まで返す。
  * 解説が欠けていても出題はできるので空文字で補う。

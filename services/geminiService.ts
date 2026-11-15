@@ -5,7 +5,8 @@ import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from 
 import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
 import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
 import { getCachedAnalysis, setCachedAnalysis } from "./imageAnalysisCache";
-import { sanitizeQuestions, OPTION_COUNT } from "./quizValidation";
+import { sanitizeQuestions, shuffleOptions, OPTION_COUNT } from "./quizValidation";
+import { assignQuizStyles } from "./quizStyles";
 
 // ハングした要求はタイムアウトで切って次のフォールバックモデルに回す。
 // 注意: SDKのretryOptionsは使わない — 有効にするとエラーがAbortErrorに
@@ -265,8 +266,17 @@ const amanoPlanningProperties = {
   twist: { type: Type.STRING, description: "元の内容から何をどう変えて応用問題にしたか（数値・具体例・場面・問い方の変更点）" },
 };
 
-const buildQuizSchema = (teacher: TeacherType) => {
-  const planning = teacher === TeacherType.AMANO ? amanoPlanningProperties : {};
+// クイズモード用: 割り当てたスタイルと「へえ！」ポイントを先に書かせ、
+// 「画像の○○は何？」型の素直な問題に流れないようにする
+const quizPlanningProperties = {
+  quizStyle: { type: Type.STRING, description: "この問題に割り当てられた出題スタイル名（指示のとおりに書き写す）" },
+  hook: { type: Type.STRING, description: "この問題の「へえ！」「なるほど！」ポイント（答えを知って驚く・笑う理由）を一言で" },
+};
+
+const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
+  const planning = mode === GameMode.QUIZ
+    ? quizPlanningProperties
+    : teacher === TeacherType.AMANO ? amanoPlanningProperties : {};
   const keys = [...Object.keys(planning), ...baseQuestionKeys];
   return {
     type: Type.ARRAY,
@@ -370,10 +380,12 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
   }
   const now = Date.now();
   return questions.map((q, i) => {
-    // あまの先生の作問メモ（originalContent等）はゲームには不要なので取り除く
-    const { originalContent, learningTheme, twist, ...rest } = q as any;
+    // 作問メモ（あまの先生の originalContent 等、クイズモードの quizStyle 等）はゲームには不要なので取り除く
+    const { originalContent, learningTheme, twist, quizStyle, hook, ...rest } = q as any;
     if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
-    return { ...rest, id: `q-${i}-${now}` };
+    if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook}`);
+    // AIは正解を前の方に置きがちなので、選択肢の並びをシャッフルする
+    return { ...shuffleOptions(rest as QuizQuestion), id: `q-${i}-${now}` };
   });
 };
 
@@ -496,14 +508,30 @@ export const generateQuizFromImages = async (
 
   let modeInstructions: string;
   if (mode === GameMode.QUIZ) {
-    modeInstructions = `【クイズモード】
-    - 目的: エンターテインメント、創造性、ひらめき。
-    - 内容: 画像の内容を「きっかけ」として、そこから連想される自由な知識、なぞなぞ、雑学を出題する。
-    - 重要ルール: 画像に直接書かれている単語を当てるだけの問題は避け、一段階ひねった問題にする。
-    - 手法例:
-      1. なぞなぞ化: 連想ゲームや言葉遊びを用いる。
-      2. 関連知識: 画像から連想される意外な歴史や雑学。
-    - プレイヤーが驚くような、自由度の高い出題を心がける。`;
+    // 1問ごとに違う出題スタイルを割り当てる（任せると同じ型に偏るため）。毎回シャッフル
+    const styleLines = assignQuizStyles(TOTAL_QUESTIONS)
+      .map((st, i) => `  問${i + 1}: 【${st.name}】${st.howTo}（例: ${st.example}）`)
+      .join('\n');
+    modeInstructions = `【クイズモード】目的: 画像をきっかけに、子供が「へえ！」「なるほど！」「そういうことか！」と言いたくなる、遊びとして面白いクイズを作ること。
+
+■ 出題スタイルの割り当て（必ずこの順番・このスタイルで作る。例は形の参考で、題材は画像から選ぶ）
+${styleLines}
+
+■ 各問題の作り方（出力の項目もこの順に書く）
+  1. quizStyle: 割り当てられたスタイル名をそのまま書き写す。
+  2. hook: この問題の「へえ！」ポイント（答えを知ったときに驚く・笑う理由）を一言で書く。そのスタイルで面白い問題になる題材が見つからなければ、別の画像の題材に変える（スタイルは変えない）。
+  3. question 以降: quizStyle と hook を反映した問題を作る。
+
+■ 面白くするコツ
+  - 画像は「きっかけ」。画像に書かれている語句や答えをそのまま当てさせる問題は禁止。画像の題材から一歩・二歩ジャンプした話題にしてよい。
+  - 画像が複数あるときは、なるべく多くの画像から題材を選び、同じ画像・同じ話題が続かないようにする。
+  - 問題文の書き出しや言い回しを毎回変える（「〜は何？」「〜はどれ？」ばかりにしない）。
+  - 不正解の選択肢も「ありそう」と思えるものにし、ふざけすぎない。思わず選びたくなる引っかけを1つ入れる。
+  - 事実を問う問題は、図鑑や教科書にのっている確かな事実だけを使う。あやふやな雑学・都市伝説・自分で作った数字は使わない。
+  - 正解はかならず1つに決まるようにする。「〜とされている」「だいたい」など、答えがあいまいになる問い方はしない。
+  - なぞなぞは、答えを聞いて「なるほど！」と言える言葉遊びの仕掛け（ダジャレ・言葉の中に隠れた文字など）を必ず入れる。
+
+■ 解説: 正解の理由に加えて、「ついでに豆知識」を一つ添える。`;
   } else if (teacher === TeacherType.AMANO) {
     modeInstructions = `【べんきょうモード・あまの先生】最重要ルール：画像の問題をそのまま出してはいけない。
 画像（解析結果）は「どの単元を勉強しているか」を知るための元ネタにすぎない。問題は必ず、同じ単元・同じ考え方を使う"新しい"応用問題として作り直すこと。
@@ -544,7 +572,7 @@ export const generateQuizFromImages = async (
     - 解説: なぜその答えになるのか、画像内のどの部分が重要なのかを教育的に説明する。`;
   }
 
-  const quizSchema = buildQuizSchema(mode === GameMode.QUIZ ? TeacherType.SUNAO : teacher);
+  const quizSchema = buildQuizSchema(mode, teacher);
 
   // モード別指示は最も守ってほしいルールなので先頭に置く（末尾だと画像の内容に引っ張られやすい）
   const prompt = `提供された画像（または画像の解析結果）をもとに、4択クイズを${TOTAL_QUESTIONS}問、JSON形式で作成してください。
