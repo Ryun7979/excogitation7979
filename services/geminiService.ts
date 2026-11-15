@@ -240,28 +240,45 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const quizSchema = {
-  type: Type.ARRAY,
-  minItems: String(TOTAL_QUESTIONS),
-  maxItems: String(TOTAL_QUESTIONS),
-  items: {
-    type: Type.OBJECT,
-    properties: {
-      question: { type: Type.STRING, description: "クイズの問題文" },
-      options: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
-        minItems: String(OPTION_COUNT),
-        maxItems: String(OPTION_COUNT),
-        description: "4つの選択肢（必ず4つ）",
-      },
-      correctAnswerIndex: { type: Type.INTEGER, description: "正解のインデックス(0-3)" },
-      explanation: { type: Type.STRING, description: "解説文（100文字程度）" },
-      targetAge: { type: Type.STRING, description: "推定対象学年" },
-      sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった画像の番号（送信された画像の0始まりインデックス）" },
-    },
-    required: ["question", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"],
+const baseQuestionProperties = {
+  question: { type: Type.STRING, description: "クイズの問題文" },
+  options: {
+    type: Type.ARRAY,
+    items: { type: Type.STRING },
+    minItems: String(OPTION_COUNT),
+    maxItems: String(OPTION_COUNT),
+    description: "4つの選択肢（必ず4つ）",
   },
+  correctAnswerIndex: { type: Type.INTEGER, description: "正解のインデックス(0-3)" },
+  explanation: { type: Type.STRING, description: "解説文（100文字程度）" },
+  targetAge: { type: Type.STRING, description: "推定対象学年" },
+  sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった画像の番号（送信された画像の0始まりインデックス）" },
+};
+const baseQuestionKeys = ["question", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
+
+// あまの先生用: 問題文より先に「元ネタ」と「どう変えたか」を書かせる。
+// 軽量モデル＋思考最小だと、先に書き出させないと元の問題をそのまま写しがちなため。
+// propertyOrdering で生成順を固定する（この順に出力される）
+const amanoPlanningProperties = {
+  originalContent: { type: Type.STRING, description: "元画像に実際に載っていた問題・数値・語句（短く書き写す）" },
+  learningTheme: { type: Type.STRING, description: "元画像の学習テーマ・単元（例: くり上がりのある2桁のたし算）" },
+  twist: { type: Type.STRING, description: "元の内容から何をどう変えて応用問題にしたか（数値・具体例・場面・問い方の変更点）" },
+};
+
+const buildQuizSchema = (teacher: TeacherType) => {
+  const planning = teacher === TeacherType.AMANO ? amanoPlanningProperties : {};
+  const keys = [...Object.keys(planning), ...baseQuestionKeys];
+  return {
+    type: Type.ARRAY,
+    minItems: String(TOTAL_QUESTIONS),
+    maxItems: String(TOTAL_QUESTIONS),
+    items: {
+      type: Type.OBJECT,
+      properties: { ...planning, ...baseQuestionProperties },
+      required: keys,
+      propertyOrdering: keys,
+    },
+  };
 };
 
 // 2.0系は提供終了(404)。'-latest'系エイリアスは中身が勝手に変わり、応答が返らないこともあるため
@@ -352,7 +369,12 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
     throw new RetryableError(`AIの問題が足りませんでした（${questions.length}/${TOTAL_QUESTIONS}問）`);
   }
   const now = Date.now();
-  return questions.map((q, i) => ({ ...q, id: `q-${i}-${now}` }));
+  return questions.map((q, i) => {
+    // あまの先生の作問メモ（originalContent等）はゲームには不要なので取り除く
+    const { originalContent, learningTheme, twist, ...rest } = q as any;
+    if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
+    return { ...rest, id: `q-${i}-${now}` };
+  });
 };
 
 async function generateQuizSinglePhase(
@@ -360,6 +382,7 @@ async function generateQuizSinglePhase(
   attemptIndices: number[],
   getResizedBase64: (fileIndex: number) => Promise<string>,
   prompt: string,
+  quizSchema: object,
   modelName: string,
 ): Promise<QuizQuestion[]> {
   const imageParts = await Promise.all(attemptIndices.map(async i => ({
@@ -383,6 +406,7 @@ async function generateQuizTwoPhase(
   attemptIndices: number[],
   getResizedBase64: (fileIndex: number) => Promise<string>,
   prompt: string,
+  quizSchema: object,
   modelName: string,
   onProgress: (message: string) => void,
 ): Promise<QuizQuestion[]> {
@@ -429,9 +453,11 @@ async function generateQuizTwoPhase(
   const analysisBlock = attemptIndices
     .map((fileIndex, pos) => `[画像${pos}]\n${getCachedAnalysis(files[fileIndex])}`)
     .join('\n\n');
+  // 解析結果は「元ネタ」。指示の後ろに置き、指示より先に読ませて丸写しを誘発しないようにする
+  const contents = `${prompt}\n\n===== 画像の解析結果（元ネタ） =====\n${analysisBlock}\n===== ここまで =====\n\n上の指示に従って${TOTAL_QUESTIONS}問を作成してください。`;
   const response = await ai.models.generateContent({
     model: modelName,
-    contents: `${analysisBlock}\n\n${prompt}`,
+    contents,
     config: {
       responseMimeType: "application/json",
       responseSchema: quizSchema,
@@ -479,14 +505,37 @@ export const generateQuizFromImages = async (
       2. 関連知識: 画像から連想される意外な歴史や雑学。
     - プレイヤーが驚くような、自由度の高い出題を心がける。`;
   } else if (teacher === TeacherType.AMANO) {
-    modeInstructions = `【べんきょうモード・あまの先生】
-    - 目的: 画像で扱われている学習テーマ・単元への理解を深め、応用力を鍛えること。雑学・なぞなぞ・言葉遊びには絶対に逃げないこと（それは「クイズモード」の役割であり、ここでは禁止）。
-    - 手順: まず画像から「学習テーマ」（例: 2桁の足し算、〇〇という漢字、〇〇の単元、特定の理科・社会の概念など）を認識する。そのうえで、同じテーマ・同じ形式のまま、画像とは異なる具体例に置き換えた応用問題を新たに作成する。
-    - 計算問題の場合: 画像と同じ演算・同じ桁数の問題を、画像に書かれていない別の数値で出題する（画像の数式や答えをそのまま流用しない）。
-    - 漢字・語句の場合: 画像に登場した漢字・語句について、画像内では使われていない別の読み方（音読み/訓読み）・別の熟語・別の文脈での使い方を問う。
-    - その他の教科の場合: 画像の単元・概念を使い、画像には書かれていない一段階発展した応用問題にする。
-    - 禁止: 画像の内容（数値・文章・図）をほぼそのまま使い回すこと。
-    - 解説: 元の画像のテーマとどうつながっているか、応用のポイントを教育的に説明する。`;
+    modeInstructions = `【べんきょうモード・あまの先生】最重要ルール：画像の問題をそのまま出してはいけない。
+画像（解析結果）は「どの単元を勉強しているか」を知るための元ネタにすぎない。問題は必ず、同じ単元・同じ考え方を使う"新しい"応用問題として作り直すこと。
+
+■ 各問題の作り方（出力の項目もこの順に書く）
+  1. originalContent: 元画像に実際に載っていた問題・数値・語句を短く書き写す。
+  2. learningTheme: その学習テーマ・単元を一言で書く。
+  3. twist: 元の内容から何をどう変えたかを書く。次のうち少なくとも1つ（できれば2つ）を必ず行う。
+     (a) 数値・語句・具体例を、画像に無い別のものに置き換える
+     (b) 文章題・生活の場面にして、同じ考え方を使わせる
+     (c) 逆向きに問う（答えから式や条件を求める、穴うめにする など）
+     (d) 一段階ステップを増やす（2つの知識を組み合わせる、理由を問う など）
+  4. question 以降: twist に書いた変更を反映した問題を作る。
+
+■ 良い例・悪い例
+  - 元画像「23 + 18 = ?」
+    悪い例:「23 + 18 はいくつ？」（そのまま）
+    良い例:「47 + 35 はいくつ？」(a) /「りんごが27こ、みかんが19こあります。あわせて何こ？」(b) /「□ + 28 = 61 の□に入る数は？」(c)
+  - 元画像に漢字「生」（読み: せい）
+    悪い例:「『生』の読み方は？」で画像と同じ読みを答えさせる
+    良い例:「『生える』の読み方は？」/「『一生けんめい』の『生』と同じ読み方をするのはどれ？」
+  - 元画像「植物の成長には日光が必要」
+    悪い例:「植物が育つのに必要なものは？」（画像の文をそのまま問う）
+    良い例:「1週間、箱をかぶせて暗くしておいたインゲンの葉は、どうなっている？」(b)(d)
+
+■ 禁止事項
+  - originalContent と question の中身（数値・語句・文章）が同じになること。
+  - 画像に書かれている答えをそのまま正解にすること。
+  - 雑学・なぞなぞ・言葉遊びに逃げること（それはクイズモードの役割）。
+  - 単元から外れること。難しくしすぎず、元画像と同じ学年の子が考えれば解けるレベルにする。
+
+■ 解説: 元の画像のどの学習とつながっているか、どこが応用のポイントかを教育的に説明する。`;
   } else {
     modeInstructions = `【べんきょうモード・すなお先生】
     - 目的: 学習内容の着実な理解と基礎知識の定着。
@@ -495,15 +544,19 @@ export const generateQuizFromImages = async (
     - 解説: なぜその答えになるのか、画像内のどの部分が重要なのかを教育的に説明する。`;
   }
 
-  const prompt = `提供された画像の解析結果をもとに、4択クイズを${TOTAL_QUESTIONS}問、JSON形式で作成してください。
+  const quizSchema = buildQuizSchema(mode === GameMode.QUIZ ? TeacherType.SUNAO : teacher);
+
+  // モード別指示は最も守ってほしいルールなので先頭に置く（末尾だと画像の内容に引っ張られやすい）
+  const prompt = `提供された画像（または画像の解析結果）をもとに、4択クイズを${TOTAL_QUESTIONS}問、JSON形式で作成してください。
+
+${modeInstructions}
+
 共通ルール：
 1. 【画像参照の禁止】: 独立したクイズとして成立させてください。
 2. 【言語】: 子供向けの楽しい日本語を使用。
 3. 【先生スタイル】: ${teacherStyle}性格で出題。
 4. 【元画像の明示】: 各問題について、その問題の元になった画像の番号（送信順で0始まり）をsourceImageIndexとして必ず含めてください。
-5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。
-モード別指示:
-${modeInstructions}`;
+5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。`;
 
   return queuedRequest(async () => {
     onProgress("画像を解析して遊び方を考えています...");
@@ -523,8 +576,8 @@ ${modeInstructions}`;
         const startedAt = Date.now();
 
         const questions = useFastRetry
-          ? await generateQuizTwoPhase(ai, files, attemptIndices, getResizedBase64, prompt, modelName, onProgress)
-          : await generateQuizSinglePhase(ai, attemptIndices, getResizedBase64, prompt, modelName);
+          ? await generateQuizTwoPhase(ai, files, attemptIndices, getResizedBase64, prompt, quizSchema, modelName, onProgress)
+          : await generateQuizSinglePhase(ai, attemptIndices, getResizedBase64, prompt, quizSchema, modelName);
 
         // 速く成功したら次回は1段戻し、遅かったら今回の枚数を維持する
         adaptiveMaxImages = (Date.now() - startedAt < FAST_RESPONSE_MS)
