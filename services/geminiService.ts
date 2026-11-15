@@ -5,6 +5,7 @@ import { QuizQuestion, TOTAL_QUESTIONS, GameMode, TeacherType, ImageStat } from 
 import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
 import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
 import { getCachedAnalysis, setCachedAnalysis } from "./imageAnalysisCache";
+import { sanitizeQuestions, OPTION_COUNT } from "./quizValidation";
 
 // ハングした要求はタイムアウトで切って次のフォールバックモデルに回す。
 // 注意: SDKのretryOptionsは使わない — 有効にするとエラーがAbortErrorに
@@ -241,11 +242,19 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const quizSchema = {
   type: Type.ARRAY,
+  minItems: String(TOTAL_QUESTIONS),
+  maxItems: String(TOTAL_QUESTIONS),
   items: {
     type: Type.OBJECT,
     properties: {
       question: { type: Type.STRING, description: "クイズの問題文" },
-      options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "4つの選択肢（必ず4つ）" },
+      options: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        minItems: String(OPTION_COUNT),
+        maxItems: String(OPTION_COUNT),
+        description: "4つの選択肢（必ず4つ）",
+      },
       correctAnswerIndex: { type: Type.INTEGER, description: "正解のインデックス(0-3)" },
       explanation: { type: Type.STRING, description: "解説文（100文字程度）" },
       targetAge: { type: Type.STRING, description: "推定対象学年" },
@@ -335,6 +344,17 @@ const buildAnalysisPrompt = (count: number) =>
 後でこの要約だけを使ってクイズを作るので、画像を見なくても再現できるくらい具体的に書いてください。
 画像の送信順に、JSON配列で1画像1要素として返してください（配列の要素数は必ず${count}個）。`;
 
+// ゲームは常に TOTAL_QUESTIONS 問ある前提で進むため、足りない・形が壊れた応答は
+// 再試行対象にする（そのまま使うと途中で問題が無くなり画面が落ちる）
+const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
+  const questions = sanitizeQuestions(JSON.parse(text || "[]"), TOTAL_QUESTIONS);
+  if (questions.length < TOTAL_QUESTIONS) {
+    throw new RetryableError(`AIの問題が足りませんでした（${questions.length}/${TOTAL_QUESTIONS}問）`);
+  }
+  const now = Date.now();
+  return questions.map((q, i) => ({ ...q, id: `q-${i}-${now}` }));
+};
+
 async function generateQuizSinglePhase(
   ai: GoogleGenAI,
   attemptIndices: number[],
@@ -354,11 +374,7 @@ async function generateQuizSinglePhase(
       ...buildModelConfig(modelName),
     },
   });
-  const data = JSON.parse(response.text || "[]");
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new RetryableError("AIの応答が空でした");
-  }
-  return data.map((q: any, i: number) => ({ ...q, id: `q-${i}-${Date.now()}` }));
+  return parseQuizResponse(response.text);
 }
 
 async function generateQuizTwoPhase(
@@ -422,11 +438,7 @@ async function generateQuizTwoPhase(
       ...buildModelConfig(modelName),
     },
   });
-  const data = JSON.parse(response.text || "[]");
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new RetryableError("AIの応答が空でした");
-  }
-  return data.map((q: any, i: number) => ({ ...q, id: `q-${i}-${Date.now()}` }));
+  return parseQuizResponse(response.text);
 }
 
 export const generateQuizFromImages = async (
