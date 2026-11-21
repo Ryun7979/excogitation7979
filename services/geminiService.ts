@@ -151,7 +151,7 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
   const now = Date.now();
   return questions.map((q, i) => {
     // 作問メモ（あまの先生の originalContent 等、クイズモードの quizStyle 等）はゲームには不要なので取り除く
-    const { originalContent, learningTheme, twist, quizStyle, hook, basis, asks, solution, answer, ...rest } = q as any;
+    const { originalContent, learningTheme, twist, quizStyle, hook, basis, questionForm, asks, solution, answer, ...rest } = q as any;
     if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
     if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook} / 根拠: ${basis}`);
     // AIは正解を前の方に置きがちなので、選択肢の並びをシャッフルする

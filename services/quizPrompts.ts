@@ -3,7 +3,7 @@
 
 import { Type } from "./aiModels";
 import { OPTION_COUNT } from "./quizValidation";
-import { assignQuizStyles } from "./quizStyles";
+import { assignQuizStyles, assignStudyForms } from "./quizStyles";
 import { TOTAL_QUESTIONS, GameMode, TeacherType } from "../types";
 import type { QuizQuestion } from "../types";
 
@@ -60,13 +60,21 @@ const quizPlanningProperties = {
 // AI混雑時は1分以上待たされるため
 export const GENERATION_COUNT = TOTAL_QUESTIONS + 2;
 
-// 同じ問い方の問題の上限（AIへの指示）。コード側でも予備から別の型を優先して選ぶ（quizValidation.pickVaried）
-const MAX_SAME_FORM = 4;
+// 同じ問い方の問題の上限（AIへの指示。べんきょうモードの割り当て assignStudyForms と同じ3問）。
+// コード側でも予備から別の型を優先して選ぶ（quizValidation.pickVaried）
+const MAX_SAME_FORM = 3;
+
+// べんきょうモード用: 割り当てた問い方を先に書かせる（同じ型ばかりになるのを防ぐ。T12）
+const studyPlanningProperties = {
+  questionForm: { type: Type.STRING, description: "この問題の問い方。漢字・ことばの元ネタで作るときは、割り当てられた問い方の名前（読み・書き・意味・使い方・送りがな）を書き写す。計算・英語・理科・社会などの元ネタで作るときは「計算」「英語」のように、その教材に合う問い方を書く" },
+};
 
 export const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
   const planning = mode === GameMode.QUIZ
     ? quizPlanningProperties
-    : teacher === TeacherType.AMANO ? amanoPlanningProperties : {};
+    : teacher === TeacherType.AMANO
+      ? { ...studyPlanningProperties, ...amanoPlanningProperties }
+      : studyPlanningProperties;
   const keys = [...Object.keys(planning), ...baseQuestionKeys];
   return {
     type: Type.ARRAY,
@@ -177,6 +185,7 @@ ${styleLines}
 
 ■ 禁止事項
   - originalContent と question の中身（数値・語句・文章）が同じになること。
+  - 漢字・ことばの問題で、教材の例文や言葉（「国民の税金」「小枝を拾う」など）をそのまま問題文に使うこと。割り当てられた問い方（読み・書き・意味・使い方・送りがな）で作るときも、同じ漢字を使った別の言葉・別の例文にする（例: 教材「国民の税金」→「税関」「所得税」/ 教材「小枝を拾う」→「枝豆」「枝分かれ」）。
   - 画像に書かれている答えをそのまま正解にすること。
   - 雑学・なぞなぞ・言葉遊びに逃げること（それはクイズモードの役割）。
   - 単元から外れること。難しくしすぎず、元画像と同じ学年の子が考えれば解けるレベルにする。
@@ -191,6 +200,13 @@ ${styleLines}
     - 解説: なぜその答えになるのか、画像内のどの部分が重要なのかを教育的に説明する。`;
   }
 
+
+  // べんきょうモードは、漢字・ことばの問題の問い方を1問ずつ割り当てる（毎回シャッフル）。
+  // 「4問まで」と書くだけでは守られない回があったため（T12）
+  const studyFormRule = mode === GameMode.QUIZ ? '' : `
+   - 問い方の割り当て（漢字・ことばの元ネタで作る問題は、この番号の問い方で作る。questionForm に名前を書き写す）
+${assignStudyForms(GENERATION_COUNT).map((f, i) => `     問${i + 1}: 【${f.name}】${f.howTo}`).join('\n')}
+     計算・英語・理科・社会などの元ネタで作る問題は、この割り当てに従わず、その教材に合う問い方にする（questionForm には「計算」などと書く）。`;
 
   // モード別指示は最も守ってほしいルールなので先頭に置く（末尾だと画像の内容に引っ張られやすい）
   return `提供された画像（または画像の解析結果）をもとに、4択クイズを${GENERATION_COUNT}問、JSON形式で作成してください。
@@ -240,7 +256,7 @@ ${modeInstructions}
 5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。
    - 選択肢は答えそのものだけを書く。「〜の読み方」「〜の熟語」「〜の学習」のような、4つ全部に付く飾りの言葉は付けない。
      悪い例: 「エキの読み方」「トクの読み方」 → 良い例: 「エキ」「トク」
-6. 【問い方を散らす】: 同じ問い方の問題は${GENERATION_COUNT}問中${MAX_SAME_FORM}問までにする（例: 「漢字『○』の読み方として正しいものは？」ばかりにしない）。
+6. 【問い方を散らす】: 同じ問い方の問題は${GENERATION_COUNT}問中${MAX_SAME_FORM}問までにする（例: 「漢字『○』の読み方として正しいものは？」ばかりにしない）。${studyFormRule}
    - 漢字・ことばの教材なら、読み／書き（「〜を漢字で書くと？」）／送りがな／意味／熟語・使い方（文に合う言葉を選ぶ）を組み合わせる。同じ漢字や言葉でも、問い方を変えれば別の問題にしてよい。
    - 部首・画数・筆順は、教材にはっきり書いてあるときだけ問う（覚えちがいで正解をまちがえやすいため。例:「災」の部首は「火」）。
    - 計算の教材なら、計算そのもののほかに、計算の決まり（くり上がり・たしかめ算 など）や、式の意味を問う問題も混ぜる。

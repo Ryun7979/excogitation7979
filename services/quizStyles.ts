@@ -97,3 +97,36 @@ export const assignQuizStyles = (
   }
   return result.slice(0, count);
 };
+
+// ---------- べんきょうモードの「問い方」（T12） ----------
+// 漢字ドリルなどで「漢字『○』の読み方は？」ばかりになるのを防ぐため、
+// クイズモードの出題スタイルと同じように、1問ごとに問い方をコード側で割り当てる。
+// 計算・英語・理科などの元ネタで作る問題には当てはまらないので、プロンプトで
+// 「漢字・ことばの元ネタで作るときだけ従う」と指示する。
+// 部首・画数・筆順は入れない（軽量モデルが覚えちがいで正解をまちがえやすいため）。
+
+export interface StudyForm {
+  name: string;
+  howTo: string;
+}
+
+export const STUDY_FORMS: StudyForm[] = [
+  { name: "読み", howTo: "漢字の言葉の読み方を選ばせる" },
+  { name: "書き", howTo: "ひらがなで書いた言葉を、漢字で書くとどれかを選ばせる" },
+  { name: "意味", howTo: "言葉の意味を選ばせる" },
+  { name: "使い方", howTo: "短い文の（　）に入る言葉を選ばせる。正解を（　）に入れた文を読み返し、自然な日本語になること（「（　）を防ぐ」に「防災」は入らない）。不正解を入れると意味が通らないこと" },
+  { name: "送りがな", howTo: "送りがなが正しいものを選ばせる" },
+];
+
+// 12問ぶんの割り当ての元。同じ問い方は12問中3問まで
+const STUDY_FORM_POOL = ["読み", "読み", "読み", "書き", "書き", "書き", "意味", "意味", "意味", "使い方", "使い方", "送りがな"];
+
+/** count問分の問い方を割り当てる（毎回シャッフル。同じ問い方は12問中3問まで） */
+export const assignStudyForms = (
+  count: number,
+  random: () => number = Math.random
+): StudyForm[] => {
+  const names: string[] = [];
+  while (names.length < count) names.push(...shuffled(STUDY_FORM_POOL, random));
+  return names.slice(0, count).map(n => STUDY_FORMS.find(f => f.name === n)!);
+};
