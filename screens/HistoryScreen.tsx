@@ -29,7 +29,7 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ history, onBack, o
     : 0;
 
   return (
-    <div className="h-full bg-gradient-to-br from-brand-from to-brand-to safe-area">
+    <div className="h-full pop-bg safe-area">
       <div className="thin-scrollbar h-full overflow-y-auto">
         <div className="mx-auto flex max-w-4xl flex-col gap-fl-4 p-fl-4">
           <header className="flex items-center gap-fl-2">
@@ -91,7 +91,7 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({ history, onBack, o
                         {w.question}
                       </summary>
                       <div className="mt-fl-1 select-text pl-4 text-fl-sm text-ink-muted">
-                        <p className="font-bold">こたえ: <span className="text-ok">{w.options[w.correctAnswerIndex]}</span></p>
+                        <p className="font-bold">こたえ: <span className="text-ok-ink">{w.options[w.correctAnswerIndex]}</span></p>
                         {w.explanation && <p className="whitespace-pre-wrap">{w.explanation}</p>}
                       </div>
                     </details>

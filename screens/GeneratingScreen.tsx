@@ -39,7 +39,7 @@ export const GeneratingScreen: React.FC<GeneratingScreenProps> = ({ message, ima
       : 'AIがこみあっているみたい。もう少しまってね';
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-fl-4 bg-gradient-to-br from-brand-from to-brand-to p-fl-4 text-center text-white safe-area">
+    <div className="flex h-full flex-col items-center justify-center gap-fl-4 pop-bg p-fl-4 text-center text-white safe-area">
       <Loader2 className="h-[clamp(4rem,14vmin,8rem)] w-[clamp(4rem,14vmin,8rem)] animate-spin text-amber-300" aria-hidden="true" />
       <div role="status" aria-live="polite" className="max-w-2xl">
         <p className="text-fl-2xl font-black">{message ?? '準備中...'}</p>

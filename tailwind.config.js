@@ -36,23 +36,47 @@ export default {
           DEFAULT: '#1e293b', // slate-800: 白地の本文
           muted: '#475569', // slate-600: 白地の補足（7.5:1）
         },
+        // 背景はあざやかな 青→むらさき→ピンク（どこでも白文字 4.5:1 以上: 5.2 / 5.7 / 4.6）
         brand: {
-          from: '#0369a1', // sky-700: 白文字 5.9:1
-          to: '#4338ca', // indigo-700: 白文字 7.9:1
-          accent: '#0284c7', // sky-600
+          from: '#2563eb', // blue-600
+          via: '#7c3aed', // violet-600
+          to: '#db2777', // pink-600
+          accent: '#2563eb',
         },
+        // 正解・不正解は、ひと目で分かるあざやかな色。大きく太い文字なので 3:1 以上あればよい
         ok: {
-          DEFAULT: '#0f766e', // teal-700: 白文字 5.5:1
-          soft: '#ccfbf1',
+          DEFAULT: '#16a34a', // green-600: 白文字 3.3:1
+          ink: '#15803d', // green-700: 白地の小さい文字用 5.0:1
+          soft: '#dcfce7',
+          ring: '#86efac',
         },
         ng: {
-          DEFAULT: '#be123c', // rose-700: 白文字 6.4:1
+          DEFAULT: '#e11d48', // rose-600: 白文字 4.7:1
+          ink: '#be123c', // rose-700: 白地の小さい文字用 6.4:1
           soft: '#ffe4e6',
+          ring: '#fda4af',
         },
       },
       borderRadius: {
         card: 'clamp(1rem, 3vmin, 2rem)',
         btn: 'clamp(0.75rem, 2vmin, 1.25rem)',
+      },
+      keyframes: {
+        // 押したとき・結果が出たときに、ぽんっとはずむ
+        pop: {
+          '0%': { transform: 'scale(0.92)' },
+          '60%': { transform: 'scale(1.06)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        shake: {
+          '0%, 100%': { transform: 'translateX(0)' },
+          '20%, 60%': { transform: 'translateX(-6px)' },
+          '40%, 80%': { transform: 'translateX(6px)' },
+        },
+      },
+      animation: {
+        pop: 'pop 0.35s ease-out',
+        shake: 'shake 0.4s ease-in-out',
       },
       screens: {
         // 背の低い画面（スマホ横向きなど）。縦に積むと入らないので横に並べる

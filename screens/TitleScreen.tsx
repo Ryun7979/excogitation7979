@@ -76,17 +76,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   );
 
   return (
-    <div className="flex h-full flex-col bg-gradient-to-br from-brand-from to-brand-to text-white safe-area">
+    <div className="flex h-full flex-col pop-bg text-white safe-area">
       <main className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto grid max-w-6xl gap-fl-4 p-fl-4 md:grid-cols-[minmax(260px,2fr)_3fr] short:grid-cols-[minmax(240px,2fr)_3fr]">
           <div className="flex flex-col gap-fl-4">
             <header className="flex items-start justify-between gap-fl-2">
               <div>
-                <h1 className="text-fl-3xl font-black tracking-tight">AIクイズ</h1>
+                <h1 className="text-fl-3xl font-black tracking-tight drop-shadow-[0_3px_0_rgba(0,0,0,0.2)]"><span className="text-amber-300">AI</span>クイズ</h1>
                 <p className="text-fl-sm font-bold text-white/90">教材の写真から、4択クイズを作るよ</p>
               </div>
               {historyCount > 0 && (
-                <Button variant="ghost" size="sm" onClick={onOpenHistory}>
+                <Button variant="ghost" size="sm" onClick={onOpenHistory} className="shrink-0 whitespace-nowrap">
                   <History className="h-5 w-5" aria-hidden="true" />きろく
                 </Button>
               )}

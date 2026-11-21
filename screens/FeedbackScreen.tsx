@@ -16,7 +16,7 @@ interface FeedbackScreenProps {
 }
 
 const Block: React.FC<{ label: string; tone?: 'ok' | 'ng' | 'plain'; children: React.ReactNode }> = ({ label, tone = 'plain', children }) => (
-  <div className={`rounded-btn p-fl-3 ${tone === 'ok' ? 'bg-ok-soft' : tone === 'ng' ? 'bg-ng-soft' : 'bg-surface-muted'}`}>
+  <div className={`rounded-btn border-l-8 p-fl-3 ${tone === 'ok' ? 'border-ok bg-ok-soft' : tone === 'ng' ? 'border-ng bg-ng-soft' : 'border-brand-via bg-surface-muted'}`}>
     <p className="mb-1 text-fl-xs font-black text-ink-muted">{label}</p>
     {children}
   </div>
@@ -26,16 +26,23 @@ export const FeedbackScreen: React.FC<FeedbackScreenProps> = ({
   question, isCorrect, chosenIndex, isLast, onNext, onShowDetail, detail,
 }) => {
   return (
-    <div className={`flex h-full justify-center p-fl-3 safe-area ${isCorrect ? 'bg-ok' : 'bg-ng'}`}>
+    <div className={`flex h-full justify-center p-fl-3 safe-area ${isCorrect ? 'pop-ok' : 'pop-ng'}`}>
       <div className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-card bg-white shadow-2xl">
+        {/* 結果の帯: あざやかな色の上に白い大きな文字で、ひと目で分かるように */}
         <h2
-          className={`shrink-0 px-fl-4 pb-fl-2 pt-fl-3 text-center text-fl-3xl font-black ${isCorrect ? 'text-ok' : 'text-ng'}`}
+          className={`flex shrink-0 items-center justify-center gap-fl-2 px-fl-4 py-fl-2 text-fl-3xl font-black text-white ${isCorrect ? 'bg-ok' : 'bg-ng'}`}
           aria-live="assertive"
         >
-          {isCorrect ? '◯ せいかい！' : '✕ ざんねん…'}
+          <span
+            aria-hidden="true"
+            className={`grid h-[1.4em] w-[1.4em] place-items-center rounded-full bg-white leading-none animate-pop ${isCorrect ? 'text-ok' : 'text-ng'}`}
+          >
+            {isCorrect ? '◯' : '✕'}
+          </span>
+          <span className="animate-pop">{isCorrect ? 'せいかい！' : 'ざんねん…'}</span>
         </h2>
 
-        <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-fl-2 overflow-y-auto px-fl-4 pb-fl-3">
+        <div className="thin-scrollbar flex min-h-0 flex-1 flex-col gap-fl-2 overflow-y-auto px-fl-4 py-fl-3">
           {!isCorrect && chosenIndex !== undefined && question.options[chosenIndex] !== undefined && (
             <Block label="あなたのこたえ" tone="ng">
               <p className="select-text text-fl-lg font-black text-ink">{question.options[chosenIndex]}</p>

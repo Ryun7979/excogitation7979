@@ -31,7 +31,7 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
   const wrong = total - correct;
 
   return (
-    <div className="h-full bg-gradient-to-br from-brand-from to-brand-to safe-area">
+    <div className="h-full pop-bg safe-area">
       <div className="thin-scrollbar h-full overflow-y-auto">
         <div className="mx-auto grid max-w-6xl gap-fl-4 p-fl-4 md:grid-cols-[minmax(320px,2fr)_3fr] short:grid-cols-[minmax(300px,2fr)_3fr]">
           <section className="flex flex-col gap-fl-3" aria-labelledby="score-title">
@@ -41,7 +41,7 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
             <div className="rounded-card bg-white p-fl-4 text-center shadow-xl">
               <p className="text-fl-xl font-black text-brand-to">{scoreHeadline(correct, total)}</p>
               <p className="font-black text-ink" aria-label={`${total}問中${correct}問せいかい`}>
-                <span className="text-fl-hero tabular-nums">{correct}</span>
+                <span className="text-fl-hero tabular-nums text-brand-via">{correct}</span>
                 <span className="text-fl-2xl text-ink-muted"> / {total}</span>
               </p>
               {advice && <p className="mt-fl-2 text-fl-base font-bold text-ink-muted">{advice}</p>}
@@ -81,9 +81,9 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
                     <div className="min-w-0 select-text">
                       <p className="text-fl-sm font-bold text-ink">{q.question}</p>
                       <p className="text-fl-xs font-bold text-ink-muted">
-                        こたえ: <span className="text-ok">{q.options[q.correctAnswerIndex]}</span>
+                        こたえ: <span className="text-ok-ink">{q.options[q.correctAnswerIndex]}</span>
                         {!r.isCorrect && r.chosenIndex !== undefined && q.options[r.chosenIndex] !== undefined && (
-                          <>（えらんだ: <span className="text-ng">{q.options[r.chosenIndex]}</span>）</>
+                          <>（えらんだ: <span className="text-ng-ink">{q.options[r.chosenIndex]}</span>）</>
                         )}
                       </p>
                     </div>

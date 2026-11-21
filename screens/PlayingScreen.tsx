@@ -21,6 +21,8 @@ interface PlayingScreenProps {
 }
 
 const LETTERS = ['A', 'B', 'C', 'D'];
+// 選択肢ごとにちがう色のマーク（クイズ番組のように、ぱっと見分けられる）
+const BADGE_COLORS = ['bg-rose-500', 'bg-blue-500', 'bg-emerald-600', 'bg-orange-600'];
 
 // 長い選択肢は小さくするが、子どもが読める大きさ（14px）より小さくしない
 const optionTextClass = (text: string) => {
@@ -59,7 +61,7 @@ export const PlayingScreen: React.FC<PlayingScreenProps> = ({
   const answered = selectedAnswer !== null;
 
   return (
-    <div className="flex h-full flex-col bg-gradient-to-b from-brand-from to-brand-to safe-area">
+    <div className="flex h-full flex-col pop-bg safe-area">
       <header className="mx-auto flex w-full max-w-[1600px] shrink-0 items-start gap-fl-3 px-fl-4 pb-fl-2 pt-fl-3">
         <Button variant="ghost" size="sm" onClick={onQuit} className="shrink-0">
           <X className="h-5 w-5" aria-hidden="true" />やめる
@@ -90,13 +92,16 @@ export const PlayingScreen: React.FC<PlayingScreenProps> = ({
           {question.options.map((option, idx) => {
             const isChosen = selectedAnswer === idx;
             const isAnswer = idx === question.correctAnswerIndex;
+            // 答えたあと: 正解はあざやかな緑＋◯、えらんだ不正解は赤＋✕（ゆれる）。
+            // それ以外は白のまま薄くして、正解・不正解の色が目立つようにする
             const state = !answered
-              ? 'bg-white text-ink shadow-[0_5px_0_#cbd5e1] hover:bg-amber-50 active:translate-y-[3px] active:shadow-none'
+              ? 'bg-white text-ink shadow-[0_5px_0_rgba(15,23,42,0.25)] hover:-translate-y-0.5 hover:bg-amber-50 active:translate-y-[3px] active:shadow-none'
               : isAnswer
-                ? 'bg-ok text-white shadow-none'
+                ? 'z-10 bg-ok text-white ring-4 ring-ok-ring shadow-[0_6px_0_#14532d] animate-pop'
                 : isChosen
-                  ? 'bg-ng text-white shadow-none'
-                  : 'bg-white/60 text-ink-muted shadow-none';
+                  ? 'z-10 bg-ng text-white ring-4 ring-ng-ring shadow-[0_6px_0_#881337] animate-shake'
+                  : 'bg-white text-ink-muted opacity-45 shadow-none';
+            const mark = answered && isAnswer ? '◯' : answered && isChosen ? '✕' : null;
             return (
               <button
                 key={idx}
@@ -104,15 +109,16 @@ export const PlayingScreen: React.FC<PlayingScreenProps> = ({
                 onClick={() => onAnswer(idx)}
                 disabled={answered}
                 aria-keyshortcuts={`${idx + 1} ${LETTERS[idx]}`}
-                className={`flex min-h-[clamp(3.5rem,11vmin,7rem)] items-center gap-fl-2 rounded-btn px-fl-3 py-fl-2 text-left font-black transition-colors ${state}`}
+                className={`relative flex min-h-[clamp(3.5rem,11vmin,7rem)] items-center gap-fl-2 rounded-btn px-fl-3 py-fl-2 text-left font-black transition-transform duration-150 ${state}`}
               >
                 <span
                   aria-hidden="true"
-                  className={`grid h-[clamp(2.25rem,6vmin,3.5rem)] w-[clamp(2.25rem,6vmin,3.5rem)] shrink-0 place-items-center rounded-full text-fl-base font-black ${answered ? 'bg-white/25' : 'bg-brand-accent text-white'}`}
+                  className={`grid h-[clamp(2.25rem,6vmin,3.5rem)] w-[clamp(2.25rem,6vmin,3.5rem)] shrink-0 place-items-center rounded-full text-fl-base font-black shadow-[inset_0_-3px_0_rgba(0,0,0,0.2)] ${mark ? `bg-white text-fl-lg ${isAnswer ? 'text-ok' : 'text-ng'}` : `text-white ${BADGE_COLORS[idx]}`}`}
                 >
-                  {LETTERS[idx]}
+                  {mark ?? LETTERS[idx]}
                 </span>
                 <span className={`min-w-0 flex-1 break-words leading-snug ${optionTextClass(option)}`}>{option}</span>
+                {mark && <span className="sr-only">{isAnswer ? '（せいかい）' : '（えらんだこたえ・まちがい）'}</span>}
               </button>
             );
           })}
