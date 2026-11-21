@@ -15,6 +15,11 @@ test('assignQuizStyles: スタイル数より多くても一巡するまで重�
   assert.equal(new Set(styles.slice(0, n).map(s => s.name)).size, n);
 });
 
+test('QUIZ_STYLES: なぞなぞは含まず、10問分のスタイル数がある', () => {
+  assert.ok(!QUIZ_STYLES.some(s => s.name.includes('なぞなぞ')));
+  assert.ok(QUIZ_STYLES.length >= 10);
+});
+
 test('assignQuizStyles: 毎回順番が変わる', () => {
   const runs = new Set(Array.from({ length: 10 }, () => assignQuizStyles(10).map(s => s.name).join()));
   assert.ok(runs.size > 1);
