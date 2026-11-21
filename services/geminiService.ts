@@ -326,6 +326,11 @@ const FALLBACK_MODELS = [
   'gemini-2.5-flash',
 ];
 
+// クイズ作りで使うモデル。gemini-2.5-flash-lite は外す（2026-11）。
+// 混雑時の代わりにこれが使われると、「春」の英語を winter にする・こどもの日の由来を
+// まちがえるなど、ほかのモデルより明らかに問題が崩れたため。詳しい解説には引き続き全モデルを使う
+const QUIZ_MODELS = FALLBACK_MODELS.filter(m => m !== 'gemini-2.5-flash-lite');
+
 // 思考(thinking)は応答を大幅に遅くするため最小にする。指定方法は世代で異なり、
 // 間違えると400エラー（リトライ対象外）で即失敗するので注意:
 // - 3系: thinkingBudget:0 は400になる → thinkingLevel を最小(MINIMAL)に
@@ -347,12 +352,13 @@ const ROUND_BACKOFF_MS = 3000;
 
 async function withModelFallback<T>(
   run: (modelName: string) => Promise<T>,
-  onRetry?: (modelName: string, e: unknown) => void
+  onRetry?: (modelName: string, e: unknown) => void,
+  models: readonly string[] = FALLBACK_MODELS
 ): Promise<T> {
   let lastError: unknown;
   for (let round = 0; round < MAX_FALLBACK_ROUNDS; round++) {
     if (round > 0) await sleep(ROUND_BACKOFF_MS * round);
-    for (const modelName of FALLBACK_MODELS) {
+    for (const modelName of models) {
       try {
         return await run(modelName);
       } catch (e) {
@@ -707,7 +713,8 @@ ${modeInstructions}
         } else {
           onProgress("AIがこみあっています。別ルートで再挑戦中...");
         }
-      }
+      },
+      QUIZ_MODELS
     );
   });
 };
