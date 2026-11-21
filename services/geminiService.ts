@@ -285,8 +285,15 @@ const quizPlanningProperties = {
   hook: { type: Type.STRING, description: "この問題の「へえ！」「なるほど！」ポイント（答えを知って驚く・笑う理由）を一言で" },
   // 問題文より先に正解の根拠を書かせる。軽量モデル＋思考最小だと、成り立たない
   // 問題や誤った前提（「囲」の中に「韋」）を作りがちなため
-  basis: { type: Type.STRING, description: "正解が正しいと言える根拠。教科書・辞書にのっている事実を具体的に書く。問題文に書く説明が正解に本当に当てはまるかも確かめる" },
+  // 「〜を確認する」のような一般論だけでは確かめにならない（ヒントが答えと合わない3ヒントクイズ、
+  // 4×7で解ける7×4を「5の段までなら解けない」とする、など）ため、条件を1つずつ点検させる
+  basis: { type: Type.STRING, description: "正解が正しいと言える根拠。教科書・辞書にのっている事実を具体的に書く（「〜を確認する」のような一般論は不可）。問題文に出す条件・ヒント・文を1つずつ取り上げ、正解に当てはまるかを書く（例: ヒント1→○ ヒント2→○ ヒント3→○ / 文A→本当 文B→本当 文C→ウソ 文D→本当）" },
 };
+
+// AIには予備を含めて多めに作らせ、検証を通った先頭 TOTAL_QUESTIONS 問を使う。
+// ちょうど10問だと、正解が選択肢と合わない等で1問捨てただけで全体の作り直しになり、
+// AI混雑時は1分以上待たされるため
+const GENERATION_COUNT = TOTAL_QUESTIONS + 2;
 
 const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
   const planning = mode === GameMode.QUIZ
@@ -295,8 +302,8 @@ const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
   const keys = [...Object.keys(planning), ...baseQuestionKeys];
   return {
     type: Type.ARRAY,
-    minItems: String(TOTAL_QUESTIONS),
-    maxItems: String(TOTAL_QUESTIONS),
+    minItems: String(GENERATION_COUNT),
+    maxItems: String(GENERATION_COUNT),
     items: {
       type: Type.OBJECT,
       properties: { ...planning, ...baseQuestionProperties, ...answerFirstProperties },
@@ -501,7 +508,7 @@ async function generateQuizTwoPhase(
     .map((fileIndex, pos) => `[元ネタ${pos}]\n${getCachedAnalysis(files[fileIndex])}`)
     .join('\n\n');
   // 解析結果は「元ネタ」。指示の後ろに置き、指示より先に読ませて丸写しを誘発しないようにする
-  const contents = `${prompt}\n\n===== 画像の解析結果（元ネタ） =====\n${analysisBlock}\n===== ここまで =====\n\n上の指示に従って${TOTAL_QUESTIONS}問を作成してください。`;
+  const contents = `${prompt}\n\n===== 画像の解析結果（元ネタ） =====\n${analysisBlock}\n===== ここまで =====\n\n上の指示に従って${GENERATION_COUNT}問を作成してください。`;
   const response = await ai.models.generateContent({
     model: modelName,
     contents,
@@ -548,7 +555,7 @@ export const generateQuizFromImages = async (
   let modeInstructions: string;
   if (mode === GameMode.QUIZ) {
     // 1問ごとに違う出題スタイルを割り当てる（任せると同じ型に偏るため）。毎回シャッフル
-    const styleLines = assignQuizStyles(TOTAL_QUESTIONS)
+    const styleLines = assignQuizStyles(GENERATION_COUNT)
       .map((st, i) => `  問${i + 1}: 【${st.name}】${st.howTo}（例: ${st.example}）`)
       .join('\n');
     modeInstructions = `【クイズモード】目的: 画像をきっかけに、子供が「へえ！」「なるほど！」「そういうことか！」と言いたくなる、遊びとして面白いクイズを作ること。
@@ -617,7 +624,7 @@ ${styleLines}
   const quizSchema = buildQuizSchema(mode, teacher);
 
   // モード別指示は最も守ってほしいルールなので先頭に置く（末尾だと画像の内容に引っ張られやすい）
-  const prompt = `提供された画像（または画像の解析結果）をもとに、4択クイズを${TOTAL_QUESTIONS}問、JSON形式で作成してください。
+  const prompt = `提供された画像（または画像の解析結果）をもとに、4択クイズを${GENERATION_COUNT}問、JSON形式で作成してください。
 
 ${modeInstructions}
 
