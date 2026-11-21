@@ -14,7 +14,7 @@ import { join, extname } from 'node:path';
 import { GameMode, TeacherType, TOTAL_QUESTIONS } from '../types';
 import { FALLBACK_MODELS, Type } from '../services/aiModels';
 import { GENERATION_COUNT, analysisSchema, buildAnalysisPrompt, buildQuizPrompt, buildQuizSchema } from '../services/quizPrompts';
-import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer } from '../services/quizValidation';
+import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer, violatesCondition, questionKind } from '../services/quizValidation';
 
 // ---------- 設定 ----------
 const args = Object.fromEntries(process.argv.slice(2).map(a => {
@@ -42,6 +42,25 @@ if (!apiKey) {
   process.exit(1);
 }
 const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 120_000 } });
+
+// 混雑（503）・上限（429）・通信失敗のときは待って再試行する。秒数は成功した1回だけを数える
+const generate = async (params: any): Promise<{ res: any; ms: number }> => {
+  for (let attempt = 1; ; attempt++) {
+    const started = Date.now();
+    try {
+      const res = await ai.models.generateContent(params);
+      return { res, ms: Date.now() - started };
+    } catch (e) {
+      const msg = String((e as Error).message);
+      // 1日の上限（無料枠など）は待っても戻らないので、すぐにやめる
+      if (/PerDay|per day/i.test(msg)) throw e;
+      if (attempt >= 8 || !/503|504|429|500|UNAVAILABLE|DEADLINE_EXCEEDED|RESOURCE_EXHAUSTED|INTERNAL|fetch failed/i.test(msg)) throw e;
+      const wait = 15_000 * attempt;
+      process.stdout.write(`（混雑のため${wait / 1000}秒待って再試行） `);
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+};
 
 const thinkingFor = (model: string): Record<string, any> =>
   /gemini-3/.test(model) ? { thinkingConfig: { thinkingLevel: 'MINIMAL' } } : { thinkingConfig: { thinkingBudget: 0 } };
@@ -106,7 +125,7 @@ ${material}
 ${list}
 
 1問につき1要素のJSON配列で返してください（index は上の番号）。`;
-  const res = await ai.models.generateContent({
+  const { res } = await generate({
     model: judgeModel,
     contents: prompt,
     config: { responseMimeType: 'application/json', responseSchema: judgeSchema as any },
@@ -124,21 +143,22 @@ interface RunResult {
   generated: number;
   dropped: Record<string, number>;
   kept: number;
-  judged: { question: string; options: string[]; correct: string; checks: Record<CheckKey, boolean>; comment: string }[];
+  judged: { question: string; options: string[]; correct: string; kind: string; checks: Record<CheckKey, boolean>; comment: string }[];
   error?: string;
 }
 
 const countDrops = (raw: any[]) => {
-  const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, duplicateOrExtra: 0 };
+  const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, conditionMismatch: 0, duplicateOrExtra: 0 };
   const reconciled = raw.map(reconcileAnswer);
   for (const q of reconciled) {
     if (!q || !isPlayableQuestion(q)) drops.notPlayable++;
     else if (refersToMaterial(q)) drops.materialRef++;
     else if (copiesOriginal(q)) drops.copied++;
     else if (revealsAnswer(q)) drops.revealsAnswer++;
+    else if (violatesCondition(q)) drops.conditionMismatch++;
   }
   const kept = sanitizeQuestions(raw, GENERATION_COUNT).length;
-  drops.duplicateOrExtra = raw.length - kept - drops.notPlayable - drops.materialRef - drops.copied - drops.revealsAnswer;
+  drops.duplicateOrExtra = raw.length - kept - drops.notPlayable - drops.materialRef - drops.copied - drops.revealsAnswer - drops.conditionMismatch;
   return { drops, kept };
 };
 
@@ -148,7 +168,7 @@ for (let round = 1; round <= repeat; round++) {
     // 学習内容の書き出しはモデルごとに1回（モードは関係ない）
     const analyses: string[][] = [];
     for (const batch of batches) {
-      const res = await ai.models.generateContent({
+      const { res } = await generate({
         model,
         contents: { parts: [...batch.map(i => imageParts[i]), { text: buildAnalysisPrompt(batch.length) }] },
         config: { responseMimeType: 'application/json', responseSchema: analysisSchema as any, ...thinkingFor(model) },
@@ -162,17 +182,15 @@ for (let round = 1; round <= repeat; round++) {
       for (let b = 0; b < batches.length; b++) {
         const label = `${model} / ${modeKey} / ${round}回目 / 画像${batches[b][0] + 1}〜${batches[b][batches[b].length - 1] + 1}`;
         process.stdout.write(`${label} ... `);
-        const started = Date.now();
         const material = analyses[b].map((a, pos) => `[元ネタ${pos}]\n${a}`).join('\n\n');
         try {
           const contents = `${buildQuizPrompt(mode, teacher)}\n\n===== 画像の解析結果（元ネタ） =====\n${material}\n===== ここまで =====\n\n上の指示に従って${GENERATION_COUNT}問を作成してください。`;
-          const res = await ai.models.generateContent({
+          const { res, ms } = await generate({
             model,
             contents,
             config: { responseMimeType: 'application/json', responseSchema: buildQuizSchema(mode, teacher) as any, ...thinkingFor(model) },
           });
           const raw = JSON.parse(res.text || '[]');
-          const ms = Date.now() - started;
           const { drops, kept } = countDrops(Array.isArray(raw) ? raw : []);
           const playable = sanitizeQuestions(raw, TOTAL_QUESTIONS);
           const verdicts = await judge(playable, material, modeKey);
@@ -186,6 +204,7 @@ for (let round = 1; round <= repeat; round++) {
                 question: q.question,
                 options: q.options,
                 correct: q.options[q.correctAnswerIndex],
+                kind: questionKind(q),
                 checks: Object.fromEntries(Object.keys(CHECKS).map(k => [k, v ? !!v[k as CheckKey] : false])) as Record<CheckKey, boolean>,
                 comment: v?.comment ?? '（採点なし）',
               };
@@ -194,7 +213,7 @@ for (let round = 1; round <= repeat; round++) {
           console.log(`${(ms / 1000).toFixed(1)}秒 / 使える問題 ${kept}/${GENERATION_COUNT}`);
         } catch (e) {
           console.log(`失敗: ${(e as Error).message}`);
-          results.push({ modeKey, model, round, batch: b, ms: Date.now() - started, generated: 0, dropped: {}, kept: 0, judged: [], error: String((e as Error).message) });
+          results.push({ modeKey, model, round, batch: b, ms: 0, generated: 0, dropped: {}, kept: 0, judged: [], error: String((e as Error).message) });
         }
       }
     }
@@ -210,7 +229,17 @@ for (const r of results) {
 }
 
 const checkKeys = Object.keys(CHECKS) as CheckKey[];
-const header = ['モデル', 'モード', '平均秒', '使える問題/12', ...checkKeys, 'すべて合格'];
+// 同じ型の問題の多さ: 1回のクイズ（10問）で、いちばん多い問い方（読み・書き・意味・英語・計算）が何問あったか
+const kindCounts = (judged: { kind: string }[]) => {
+  const counts: Record<string, number> = {};
+  judged.forEach(j => { counts[j.kind] = (counts[j.kind] ?? 0) + 1; });
+  return counts;
+};
+const topKindShare = (judged: { kind: string }[]) => {
+  const n = Math.max(0, ...Object.entries(kindCounts(judged)).filter(([k]) => k !== 'その他').map(([, v]) => v));
+  return judged.length ? n / judged.length : 0;
+};
+const header = ['モデル', 'モード', '平均秒', '使える問題/12', ...checkKeys, 'すべて合格', '同じ型の最大割合'];
 const rows = [...groups.entries()].map(([key, rs]) => {
   const [model, modeKey] = key.split('|');
   const judged = rs.flatMap(r => r.judged);
@@ -222,6 +251,7 @@ const rows = [...groups.entries()].map(([key, rs]) => {
     ok.length ? (ok.reduce((s, r) => s + r.kept, 0) / ok.length).toFixed(1) : '-',
     ...checkKeys.map(k => pct(judged.filter(j => j.checks[k]).length, judged.length)),
     pct(judged.filter(j => checkKeys.every(k => j.checks[k])).length, judged.length),
+    ok.length ? `${Math.round((ok.reduce((s, r) => s + topKindShare(r.judged), 0) / ok.length) * 100)}%` : '-',
   ];
 });
 
@@ -251,6 +281,10 @@ ${[...groups.entries()].map(([key, rs]) => {
   rs.forEach(r => Object.entries(r.dropped).forEach(([k, v]) => { sum[k] = (sum[k] ?? 0) + v; }));
   return `- ${key.replace('|', ' / ')}: ${Object.entries(sum).map(([k, v]) => `${k} ${v}`).join('、') || '-'}`;
 }).join('\n')}
+
+## 問い方の内訳（合計）
+
+${[...groups.entries()].map(([key, rs]) => `- ${key.replace('|', ' / ')}: ${Object.entries(kindCounts(rs.flatMap(r => r.judged))).map(([k, v]) => `${k} ${v}`).join('、') || '-'}`).join('\n')}
 
 ## 不合格だった問題
 

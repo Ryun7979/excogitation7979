@@ -91,6 +91,168 @@ export const revealsAnswer = (q: any): boolean => {
   return false;
 };
 
+// ---------- 条件と正解が合わない問題（T12） ----------
+
+// 「『海』という漢字を使って」「『海』が入る」「『海』のつく」など、正解に含まれるべき漢字の条件
+const KANJI_CONDITION =
+  /[『「]([一-鿿々]{1,4})[』」](?:という(?:漢字|字)|の(?:漢字|字))?(?:を|が|の)?(?:使|つか|ふく|含|入|はい|つく|付)/g;
+// 「使わない」「〜ではない」「まちがっている」など、条件を満たさないものを選ばせる問題は対象外
+const NEGATIVE_QUESTION = /ない|ず[、。にの]|ちが|違|誤|ウソ|うそ/;
+// 正解が「言葉」でない問題（読み・意味・画数・部首など）は、正解に漢字が入らなくて当然なので対象外
+const NOT_A_WORD_QUESTION = /意味|いみ|読|よみ|よむ|画数|何画|部首|へん|かんむり|つくり|反対|対義|類義|書き順|筆順/;
+const HAS_KANJI = /[一-鿿々]/;
+
+/**
+ * 「『X』を使った言葉は？」型で、正解に X が入っていないか。
+ * 例:「『海』という漢字を使っていて、船が出入りする場所は？（正解: 漁港）」
+ * 誤判定で正しい問題を捨てないよう、否定の問い・読みや意味を問う問題・正解が短い言葉でない問題は見ない。
+ */
+export const violatesKanjiCondition = (q: any): boolean => {
+  const question = q.question.normalize('NFKC');
+  if (NEGATIVE_QUESTION.test(question) || NOT_A_WORD_QUESTION.test(question)) return false;
+  const correct = String(q.options[q.correctAnswerIndex]).normalize('NFKC');
+  if (correct.length > 10 || /[。、]/.test(correct) || !HAS_KANJI.test(correct)) return false;
+  return [...question.matchAll(KANJI_CONDITION)].some(m => !correct.includes(m[1]));
+};
+
+// 計算式の読み取り: 全角・マイナス記号のゆれをそろえる
+const toAsciiMath = (s: string): string =>
+  s.normalize('NFKC').replace(/[−–]/g, '-').replace(/×/g, '*').replace(/÷/g, '/');
+
+/**
+ * 四則演算の式（+ - * / とかっこ、小数）を計算する。式でなければ null。
+ * eval は使わない（AIの出力をそのまま実行しないため）
+ */
+export const evaluateArithmetic = (raw: string): number | null => {
+  const s = toAsciiMath(raw).replace(/\s+/g, '');
+  if (!/^[\d.+\-*/()]+$/.test(s) || !/\d[+\-*/]\(?\d/.test(s)) return null;
+  let pos = 0;
+  const peek = () => s[pos];
+  const number = (): number | null => {
+    if (peek() === '(') {
+      pos++;
+      const v = expr();
+      if (peek() !== ')') return null;
+      pos++;
+      return v;
+    }
+    const m = /^\d+(?:\.\d+)?/.exec(s.slice(pos));
+    if (!m) return null;
+    pos += m[0].length;
+    return Number(m[0]);
+  };
+  const term = (): number | null => {
+    let v = number();
+    while (v !== null && (peek() === '*' || peek() === '/')) {
+      const op = s[pos++];
+      const r = number();
+      if (r === null || (op === '/' && r === 0)) return null;
+      v = op === '*' ? v * r : v / r;
+    }
+    return v;
+  };
+  const expr = (): number | null => {
+    let v = term();
+    while (v !== null && (peek() === '+' || peek() === '-')) {
+      const op = s[pos++];
+      const r = term();
+      if (r === null) return null;
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  };
+  const v = expr();
+  return v !== null && pos === s.length && Number.isFinite(v) ? v : null;
+};
+
+const sameNumber = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+const parseNumber = (o: string): number | null => {
+  const s = o.normalize('NFKC').replace(/[\s,]/g, '');
+  return /^-?\d+(?:\.\d+)?$/.test(s) ? Number(s) : null;
+};
+
+// 「36 − 19 はいくつ？」のように、式だけを計算させる問題（文章題・□を求める問題は対象外）
+const EXPR = String.raw`[\d(][\d\s.+\-*/()]*[\d)]`;
+const DIRECT_CALC = new RegExp(
+  String.raw`^(?:[^\d]*[。:]\s*)?(${EXPR})\s*(?:は|を計算すると|の答えは|の答え|=)?\s*(?:いくつ|何|なん|どれ)?\s*(?:ですか|でしょうか|でしょう|かな)?\s*[?]?$`,
+);
+// 「答えが 20 になる式はどれ？」（「ならない」は「なる」に当たらないので対象外）
+const TARGET_CALC = /答えが\s*(-?\d+(?:\.\d+)?)\s*に\s*なる/;
+
+/**
+ * 計算の答えが合わないか。
+ * - 「36 − 19 はいくつ？」で、正解の数が式の答えと違う（選択肢がすべて数のときだけ見る）
+ * - 「答えが 20 になる式は？」で、正解の式が 20 にならない、または不正解の式にも 20 になるものがある
+ */
+export const violatesArithmetic = (q: any): boolean => {
+  const question = toAsciiMath(q.question).trim();
+  const options: string[] = q.options;
+  const correctIndex: number = q.correctAnswerIndex;
+
+  const direct = DIRECT_CALC.exec(question);
+  if (direct) {
+    const value = evaluateArithmetic(direct[1]);
+    const numbers = options.map(parseNumber);
+    if (value !== null && numbers.every(n => n !== null)) {
+      return !sameNumber(numbers[correctIndex]!, value) ||
+        numbers.filter(n => sameNumber(n!, value)).length !== 1;
+    }
+  }
+
+  const target = TARGET_CALC.exec(question);
+  if (target) {
+    const goal = Number(target[1]);
+    const values = options.map(evaluateArithmetic);
+    if (values[correctIndex] !== null && !sameNumber(values[correctIndex]!, goal)) return true;
+    if (values.some((v, i) => i !== correctIndex && v !== null && sameNumber(v, goal))) return true;
+  }
+  return false;
+};
+
+/** 問題文の条件（「『X』を使った」「答えが N になる」など）と正解が合わないか */
+export const violatesCondition = (q: any): boolean => violatesKanjiCondition(q) || violatesArithmetic(q);
+
+// ---------- 同じ型の問題が多い（T12） ----------
+
+// 先に当てたものを優先する（「『よむ』を漢字で書くと？」は読みではなく書き）
+const QUESTION_KINDS: [string, RegExp][] = [
+  ['書き', /漢字で書|かんじで|書くと|書き方|正しい漢字|送りがな|おくりがな/],
+  ['読み', /読み|よみ|読む|よむ|と読/],
+  ['意味', /意味|いみ/],
+  ['英語', /英語|英単語|[A-Za-z]{3,}/],
+  ['計算', /\d\s*[+\-−×÷]\s*\d|計算/],
+];
+
+/** 問題の問い方の種類（読み・書き・意味・英語・計算）。どれにも当たらなければ 'その他' */
+export const questionKind = (q: any): string =>
+  QUESTION_KINDS.find(([, re]) => re.test(String(q?.question ?? '').normalize('NFKC')))?.[0] ?? 'その他';
+
+/** 1回のクイズで、同じ問い方の問題をこの割合までにする（予備の問題があるときだけ） */
+export const MAX_SAME_KIND_RATIO = 0.4;
+
+/**
+ * total 問より多くあるとき、同じ問い方が続きすぎないように選ぶ。
+ * 同じ種類は total × MAX_SAME_KIND_RATIO 問までを先に選び、足りない分は残りから順に補う
+ * （問題の数は減らさない。計算ドリルのように全部が計算でも、そのまま total 問になる）。
+ * 'その他' はいろいろな問い方の集まりなので数えない。順番は元のまま。
+ */
+export const pickVaried = <Q>(list: Q[], total: number, kindOf: (q: Q) => string = questionKind): Q[] => {
+  if (list.length <= total) return list;
+  const cap = Math.ceil(total * MAX_SAME_KIND_RATIO);
+  const counts = new Map<string, number>();
+  const chosen = new Set<number>();
+  list.forEach((q, i) => {
+    if (chosen.size >= total) return;
+    const kind = kindOf(q);
+    const n = counts.get(kind) ?? 0;
+    if (kind !== 'その他' && n >= cap) return;
+    counts.set(kind, n + 1);
+    chosen.add(i);
+  });
+  for (let i = 0; i < list.length && chosen.size < total; i++) chosen.add(i);
+  return list.filter((_, i) => chosen.has(i));
+};
+
 /** 問題文の重複判定キー（空白・記号のゆれをなくす） */
 const questionKey = (q: any): string => normalizeForHint(q.question);
 
@@ -154,12 +316,13 @@ export const sanitizeQuestions = (
   if (!Array.isArray(data)) return [];
   const seen = new Set<string>();
   const seenQuestions = new Set<string>();
-  return data
+  const usable = data
     .map(reconcileAnswer)
     .filter(isPlayableQuestion)
     .filter(q => !refersToMaterial(q))
     .filter(q => !copiesOriginal(q))
     .filter(q => !revealsAnswer(q))
+    .filter(q => !violatesCondition(q))
     .filter(q => {
       const key = duplicateKey(q);
       const qKey = questionKey(q);
@@ -167,8 +330,8 @@ export const sanitizeQuestions = (
       seen.add(key);
       seenQuestions.add(qKey);
       return true;
-    })
-    .slice(0, total)
+    });
+  return pickVaried(usable, total)
     .map((q: any) => ({
       ...q,
       explanation: typeof q.explanation === 'string' ? q.explanation : '',
