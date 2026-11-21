@@ -4,11 +4,12 @@
 /** 空応答など、アプリ側で「再試行の価値あり」と明示するためのエラー */
 export class RetryableError extends Error { }
 
-const RETRYABLE_STATUS = [408, 429, 500, 502, 503, 504];
+// 413: 中継APIに送るデータが大きすぎた。画像を減らせば通るので再試行する
+const RETRYABLE_STATUS = [408, 413, 429, 500, 502, 503, 504];
 
 // SDK のリトライ枯渇後は status を持たない Error になるため、メッセージでも判定する。
 // abort は SDK の httpOptions.timeout 発火時（AbortController経由）に出る
-const RETRYABLE_MESSAGE = /\b(408|429|500|502|503|504)\b|overloaded|unavailable|resource[_ ]exhausted|deadline|timed?[ _]?out|abort|retryable http error|fetch failed|network/i;
+const RETRYABLE_MESSAGE = /\b(408|429|500|502|503|504)\b|overloaded|unavailable|resource[_ ]exhausted|deadline|timed?[ _]?out|abort|retryable http error|fetch failed|failed to fetch|load failed|network/i;
 
 // 「リクエストが重くて処理しきれない」可能性があるエラー（タイムアウト・過負荷・5xx）。
 // このときは送信画像を減らす価値がある。429（クォータ）や認証エラーは枚数と無関係
@@ -18,7 +19,7 @@ const SLOWDOWN_MESSAGE = /\b(408|500|502|503|504)\b|overloaded|unavailable|deadl
 export const isSlowdownError = (e: unknown): boolean => {
   const err = e as { status?: unknown; message?: unknown } | null | undefined;
   const status = typeof err?.status === 'number' ? err.status : undefined;
-  if (status !== undefined) return status === 408 || status >= 500;
+  if (status !== undefined) return status === 408 || status === 413 || status >= 500;
   return SLOWDOWN_MESSAGE.test(String(err?.message ?? ''));
 };
 
@@ -41,7 +42,8 @@ export const describeApiError = (e: unknown): string => {
   if (status === 408 || /timed?[ _]?out|deadline|abort/i.test(msg)) {
     return '通信がタイムアウトしました';
   }
-  if (/fetch failed|network/i.test(msg)) {
+  if (status === 413) return '送る画像のデータが大きすぎました (413)';
+  if (/fetch failed|failed to fetch|load failed|network/i.test(msg)) {
     return 'ネットワークに接続できませんでした';
   }
   if (e instanceof SyntaxError) {

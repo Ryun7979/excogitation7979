@@ -1,28 +1,48 @@
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Upload, ChevronRight, Loader2, Star, BookOpen, Trophy, Info, Target, Sparkles, RotateCcw, MessageCircle, X } from 'lucide-react';
-import { AppStage, GameState, QuizResult, TOTAL_QUESTIONS, GameMode, TeacherType } from './types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppStage, GameState, QuizQuestion, QuizResult, GameMode, TeacherType } from './types';
 import { generateQuizFromImages, generateAdvice, generateDetailedExplanation } from './services/geminiService';
 import { isRetryableApiError, describeApiError } from './services/retryPolicy';
 import { isFastRetryEnabled, setFastRetryEnabled } from './services/featureFlags';
-import { Button } from './components/Button';
-import { ProgressBar } from './components/ProgressBar';
+import { shuffleOptions } from './services/quizValidation';
+import { buildRecord, clearHistory, loadHistory, saveRecord, PlayRecord, WrongItem } from './services/history';
 import { Modal } from './components/Modal';
 import { ApiStatus } from './components/ApiStatus';
+import { TitleScreen } from './screens/TitleScreen';
+import { GeneratingScreen } from './screens/GeneratingScreen';
+import { PlayingScreen } from './screens/PlayingScreen';
+import { FeedbackScreen } from './screens/FeedbackScreen';
+import { SummaryScreen } from './screens/SummaryScreen';
+import { HistoryScreen } from './screens/HistoryScreen';
 
 const MAX_IMAGES = 50;
+// 答えを押してから解説画面に移るまで（正解・不正解の色を見せる時間）
+const ANSWER_REVEAL_MS = 600;
+
+const initialState = (): GameState => ({
+  stage: AppStage.TITLE,
+  mode: GameMode.STUDY,
+  teacher: TeacherType.SUNAO,
+  images: [],
+  imageStats: [],
+  questions: [],
+  currentQuestionIndex: 0,
+  results: [],
+});
+
+/** 解き直し用に、選択肢の並びを変えた問題を作る */
+const toReviewQuestions = (items: Pick<QuizQuestion, 'question' | 'options' | 'correctAnswerIndex' | 'explanation'>[]): QuizQuestion[] => {
+  const now = Date.now();
+  return items.map((q, i) => shuffleOptions({
+    id: `review-${i}-${now}`,
+    question: q.question,
+    options: [...q.options],
+    correctAnswerIndex: q.correctAnswerIndex,
+    explanation: q.explanation,
+  }));
+};
 
 const App: React.FC = () => {
-  const [gameState, setGameState] = useState<GameState>({
-    stage: AppStage.TITLE,
-    mode: GameMode.STUDY,
-    teacher: TeacherType.SUNAO,
-    images: [],
-    imageStats: [],
-    questions: [],
-    currentQuestionIndex: 0,
-    results: [],
-  });
+  const [gameState, setGameState] = useState<GameState>(initialState);
 
   // 隠し機能: 画像解析結果を再利用して再試行を高速化する（デフォルトON）
   const [fastRetryEnabled, setFastRetryEnabledState] = useState<boolean>(() => isFastRetryEnabled());
@@ -34,78 +54,68 @@ const App: React.FC = () => {
     });
   };
 
+  const [history, setHistory] = useState<PlayRecord[]>(() => loadHistory());
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number>(0);
   const answerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextQuestionLockRef = useRef(false);
   const [modalState, setModalState] = useState<{ isOpen: boolean; title: string; message: string; type: 'error' | 'info' | 'success' }>({
-    isOpen: false, title: '', message: '', type: 'info'
+    isOpen: false, title: '', message: '', type: 'info',
   });
 
-  // 詳細解説用のステート
   const [isQuitConfirmOpen, setIsQuitConfirmOpen] = useState(false);
   const [isDetailedModalOpen, setIsDetailedModalOpen] = useState(false);
   const [isGeneratingDetailed, setIsGeneratingDetailed] = useState(false);
-  const [activeDetailedExplanation, setActiveDetailedExplanation] = useState("");
+  const [activeDetailedExplanation, setActiveDetailedExplanation] = useState('');
 
-  const imageUrls = useMemo(() => {
-    return gameState.images.map(file => URL.createObjectURL(file));
-  }, [gameState.images]);
-
-  useEffect(() => {
-    return () => {
-      imageUrls.forEach(url => URL.revokeObjectURL(url));
-    };
-  }, [imageUrls]);
+  const imageUrls = useMemo(() => gameState.images.map(file => URL.createObjectURL(file)), [gameState.images]);
+  useEffect(() => () => imageUrls.forEach(url => URL.revokeObjectURL(url)), [imageUrls]);
 
   // FEEDBACK画面に入るたびに「つぎの問題へ」の連打ロックを解除する
   useEffect(() => {
-    if (gameState.stage === AppStage.FEEDBACK) {
-      nextQuestionLockRef.current = false;
-    }
+    if (gameState.stage === AppStage.FEEDBACK) nextQuestionLockRef.current = false;
   }, [gameState.stage, gameState.currentQuestionIndex]);
 
   const showModal = (title: string, message: string, type: 'error' | 'info' | 'success' = 'info') => {
     setModalState({ isOpen: true, title, message, type });
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files as FileList);
-      if (files.length > MAX_IMAGES) {
-        showModal('枚数制限', `一度に${MAX_IMAGES}枚までだよ！`, 'error');
-        return;
-      }
-      setGameState(prev => ({
-        ...prev,
-        images: files,
-        imageStats: files.map(() => ({ timesSelected: 0, wrongCount: 0, questionCount: 0 })),
-      }));
-    }
-  };
-
-  const backToTitle = () => {
+  const clearAnswerTimeout = () => {
     if (answerTimeoutRef.current !== null) {
       clearTimeout(answerTimeoutRef.current);
       answerTimeoutRef.current = null;
     }
-    setGameState({
-      stage: AppStage.TITLE,
-      mode: GameMode.STUDY,
-      teacher: TeacherType.SUNAO,
-      images: [],
-      imageStats: [],
-      questions: [],
-      currentQuestionIndex: 0,
-      results: [],
-    });
+  };
+
+  const handleImagesSelected = (files: File[]) => {
+    if (files.length > MAX_IMAGES) {
+      showModal('写真が多すぎるよ', `一度に${MAX_IMAGES}まいまでだよ！`, 'error');
+      return;
+    }
+    setGameState(prev => ({
+      ...prev,
+      images: files,
+      imageStats: files.map(() => ({ timesSelected: 0, wrongCount: 0, questionCount: 0 })),
+    }));
+  };
+
+  const backToTitle = () => {
+    clearAnswerTimeout();
+    // 写真と設定は残す（同じ写真でまた遊べるように）
+    setGameState(prev => ({
+      ...initialState(),
+      mode: prev.mode,
+      teacher: prev.teacher,
+      images: prev.images,
+      imageStats: prev.imageStats,
+    }));
     setSelectedAnswer(null);
     setIsQuitConfirmOpen(false);
   };
 
   const startGeneration = async () => {
     if (gameState.images.length === 0) return;
-    setGameState(prev => ({ ...prev, stage: AppStage.GENERATING, loadingMessage: "準備中..." }));
+    setGameState(prev => ({ ...prev, stage: AppStage.GENERATING, loadingMessage: '準備中...' }));
     try {
       const { questions, selectedIndices } = await generateQuizFromImages(
         gameState.images,
@@ -113,7 +123,7 @@ const App: React.FC = () => {
         gameState.mode,
         gameState.teacher,
         (msg) => setGameState(prev => ({ ...prev, loadingMessage: msg })),
-        fastRetryEnabled
+        fastRetryEnabled,
       );
 
       // sourceImageIndexを「元のimages配列のインデックス」に正規化
@@ -125,7 +135,7 @@ const App: React.FC = () => {
 
       setGameState(prev => {
         const newStats = prev.imageStats.map((s, i) =>
-          selectedIndices.includes(i) ? { ...s, timesSelected: s.timesSelected + 1 } : s
+          selectedIndices.includes(i) ? { ...s, timesSelected: s.timesSelected + 1 } : s,
         );
         normalizedQuestions.forEach(q => {
           if (q.sourceImageIndex !== undefined && newStats[q.sourceImageIndex]) {
@@ -139,24 +149,54 @@ const App: React.FC = () => {
           ...prev,
           imageStats: newStats,
           questions: normalizedQuestions,
+          isReview: false,
           stage: AppStage.PLAYING,
           currentQuestionIndex: 0,
           results: [],
+          advice: undefined,
         };
       });
+      setSelectedAnswer(null);
       setStartTime(Date.now());
     } catch (error: any) {
       console.error(error);
       setGameState(prev => ({ ...prev, stage: AppStage.TITLE }));
       // 混雑・クォータ起因なら「待てば直る」ことを伝える
       const friendly = isRetryableApiError(error)
-        ? "AIがこみあっているみたい。少し待ってから、もう一度ためしてね。"
-        : "クイズを作れませんでした。画像をかえて試してみてね。";
-      showModal('エラー', `${friendly}\n\n【原因】${describeApiError(error)}`, 'error');
+        ? 'AIがこみあっているみたい。少し待ってから、もう一度ためしてね。'
+        : 'クイズを作れませんでした。写真をかえてためしてみてね。';
+      showModal('クイズを作れなかったよ', `${friendly}\n\n【原因】${describeApiError(error)}`, 'error');
     }
   };
 
-  const handleAnswer = (optionIndex: number) => {
+  /** まちがえた問題だけで遊ぶ（AIは呼ばない） */
+  const startReview = (items: Pick<QuizQuestion, 'question' | 'options' | 'correctAnswerIndex' | 'explanation'>[]) => {
+    if (items.length === 0) return;
+    clearAnswerTimeout();
+    setGameState(prev => ({
+      ...prev,
+      questions: toReviewQuestions(items),
+      isReview: true,
+      stage: AppStage.PLAYING,
+      currentQuestionIndex: 0,
+      results: [],
+      advice: undefined,
+    }));
+    setSelectedAnswer(null);
+    setStartTime(Date.now());
+  };
+
+  const retryWrongFromSummary = () => {
+    const wrongQuestions = gameState.results
+      .filter(r => !r.isCorrect)
+      .map(r => gameState.questions[r.questionIndex])
+      .filter((q): q is QuizQuestion => !!q);
+    startReview(wrongQuestions);
+  };
+
+  const practiceFromHistory = (items: WrongItem[]) => startReview(items);
+
+  const handleAnswer = useCallback((optionIndex: number) => {
     if (selectedAnswer !== null) return;
     setSelectedAnswer(optionIndex);
     const timeTaken = (Date.now() - startTime) / 1000;
@@ -166,13 +206,15 @@ const App: React.FC = () => {
       questionIndex: gameState.currentQuestionIndex,
       isCorrect,
       timeTakenSeconds: timeTaken,
+      chosenIndex: optionIndex,
     };
 
     answerTimeoutRef.current = setTimeout(() => {
       answerTimeoutRef.current = null;
       setGameState(prev => {
         const srcIdx = currentQuestion.sourceImageIndex;
-        const newStats = (!isCorrect && srcIdx !== undefined && prev.imageStats[srcIdx])
+        // 解き直しでは画像の統計を変えない（同じまちがいを二重に数えないため）
+        const newStats = (!prev.isReview && !isCorrect && srcIdx !== undefined && prev.imageStats[srcIdx])
           ? prev.imageStats.map((s, i) => i === srcIdx ? { ...s, wrongCount: s.wrongCount + 1 } : s)
           : prev.imageStats;
         return {
@@ -182,26 +224,25 @@ const App: React.FC = () => {
           results: [...prev.results, newResult],
         };
       });
-    }, 600);
-  };
+    }, ANSWER_REVEAL_MS);
+  }, [selectedAnswer, startTime, gameState.questions, gameState.currentQuestionIndex]);
 
   // 出題ずみの問題インジケータをタップして、その問題からやり直す
   const jumpToQuestion = (index: number) => {
     if (index >= gameState.currentQuestionIndex) return;
-    if (answerTimeoutRef.current !== null) {
-      clearTimeout(answerTimeoutRef.current);
-      answerTimeoutRef.current = null;
-    }
+    clearAnswerTimeout();
     const undoneResults = gameState.results.slice(index);
     setGameState(prev => {
       const revertedStats = prev.imageStats.map(s => ({ ...s }));
-      undoneResults.forEach(r => {
-        if (r.isCorrect) return;
-        const srcIdx = prev.questions[r.questionIndex]?.sourceImageIndex;
-        if (srcIdx !== undefined && revertedStats[srcIdx]) {
-          revertedStats[srcIdx] = { ...revertedStats[srcIdx], wrongCount: Math.max(0, revertedStats[srcIdx].wrongCount - 1) };
-        }
-      });
+      if (!prev.isReview) {
+        undoneResults.forEach(r => {
+          if (r.isCorrect) return;
+          const srcIdx = prev.questions[r.questionIndex]?.sourceImageIndex;
+          if (srcIdx !== undefined && revertedStats[srcIdx]) {
+            revertedStats[srcIdx] = { ...revertedStats[srcIdx], wrongCount: Math.max(0, revertedStats[srcIdx].wrongCount - 1) };
+          }
+        });
+      }
       return {
         ...prev,
         stage: AppStage.PLAYING,
@@ -218,15 +259,26 @@ const App: React.FC = () => {
     if (nextQuestionLockRef.current) return;
     nextQuestionLockRef.current = true;
     setSelectedAnswer(null);
-    if (gameState.currentQuestionIndex + 1 >= TOTAL_QUESTIONS) {
+    const total = gameState.questions.length;
+    if (gameState.currentQuestionIndex + 1 >= total) {
       const correctCount = gameState.results.filter(r => r.isCorrect).length;
-      const advice = await generateAdvice(correctCount);
+      // 励ましの言葉は10問満点の表で選ぶので、問題数が違うときは10点満点に直す
+      const advice = await generateAdvice(Math.round((correctCount / Math.max(1, total)) * 10));
+      const record = buildRecord({
+        mode: gameState.mode,
+        teacher: gameState.teacher,
+        isReview: !!gameState.isReview,
+        questions: gameState.questions,
+        results: gameState.results,
+      });
+      saveRecord(record);
+      setHistory(loadHistory());
       setGameState(prev => ({ ...prev, advice, stage: AppStage.SUMMARY }));
     } else {
       setGameState(prev => ({
         ...prev,
         stage: AppStage.PLAYING,
-        currentQuestionIndex: prev.currentQuestionIndex + 1
+        currentQuestionIndex: prev.currentQuestionIndex + 1,
       }));
       setStartTime(Date.now());
     }
@@ -234,7 +286,8 @@ const App: React.FC = () => {
 
   // 詳細解説を生成・表示する
   const handleShowDetailedExplanation = async () => {
-    const currentQ = gameState.questions[gameState.currentQuestionIndex];
+    const index = gameState.currentQuestionIndex;
+    const currentQ = gameState.questions[index];
 
     // キャッシュがあればそれを使う
     if (currentQ.detailedExplanation) {
@@ -247,15 +300,10 @@ const App: React.FC = () => {
     setIsDetailedModalOpen(true);
     try {
       const detail = await generateDetailedExplanation(currentQ, gameState.teacher);
-
-      // ステートの質問リスト内のデータを更新してキャッシュする
-      const updatedQuestions = [...gameState.questions];
-      updatedQuestions[gameState.currentQuestionIndex] = {
-        ...currentQ,
-        detailedExplanation: detail
-      };
-
-      setGameState(prev => ({ ...prev, questions: updatedQuestions }));
+      setGameState(prev => ({
+        ...prev,
+        questions: prev.questions.map((q, i) => i === index ? { ...q, detailedExplanation: detail } : q),
+      }));
       setActiveDetailedExplanation(detail);
     } catch (error) {
       console.error(error);
@@ -265,429 +313,101 @@ const App: React.FC = () => {
     }
   };
 
-  const getOptionFontSizeClass = (text: string) => {
-    const len = text.length;
-    if (len > 80) return 'text-[10px] sm:text-sm lg:text-lg';
-    if (len > 50) return 'text-[12px] sm:text-base lg:text-xl';
-    if (len > 22) return 'text-[16px] sm:text-xl lg:text-3xl';
-    return 'text-[22px] sm:text-3xl lg:text-5xl';
-  };
-
-  const renderTitle = () => (
-    <div className="flex flex-col lg:flex-row h-full w-full overflow-y-auto lg:overflow-hidden">
-      <div className="w-full lg:h-full lg:w-2/5 lg:max-w-[440px] bg-stone-900/10 backdrop-blur-xl p-6 lg:p-10 flex flex-col gap-6 shrink-0 border-b-2 lg:border-b-0 lg:border-r-4 border-white/20 overflow-visible lg:overflow-y-auto custom-scrollbar">
-        <div className="space-y-1">
-          <span className="text-white font-black opacity-40 text-sm tracking-widest uppercase italic">Config</span>
-          <h1 className="text-4xl lg:text-6xl font-black text-white tracking-tighter drop-shadow-md">設定</h1>
-        </div>
-        <div className="flex flex-col gap-4 lg:gap-6">
-          <div className="space-y-3">
-            <label className="text-white text-[10px] font-black opacity-80 uppercase tracking-widest block ml-2">Game Mode</label>
-            <div className="grid grid-cols-1 gap-3">
-              {[GameMode.STUDY, GameMode.QUIZ].map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setGameState(prev => ({ ...prev, mode: m }))}
-                  className={`flex items-center gap-4 lg:gap-6 p-4 lg:p-6 rounded-[1.5rem] lg:rounded-[2rem] border-4 transition-all transform active:scale-95 ${gameState.mode === m ? 'bg-white border-yellow-400 text-stone-800 shadow-[0_6px_0_#ca8a04]' : 'bg-white/20 border-white/10 text-white hover:bg-white/30'}`}
-                >
-                  <div className={`p-2 lg:p-3 rounded-xl ${gameState.mode === m ? 'bg-yellow-100' : 'bg-white/10'}`}>
-                    {m === GameMode.STUDY ? <BookOpen size={32} className={gameState.mode === m ? 'text-sky-600' : 'text-white/60'} /> : <Star size={32} className={gameState.mode === m ? 'text-yellow-600' : 'text-white/60'} />}
-                  </div>
-                  <span className="font-black text-xl lg:text-4xl">{m === GameMode.STUDY ? 'べんきょう' : 'クイズ'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={`space-y-3 transition-all duration-300 ${gameState.mode === GameMode.QUIZ ? 'opacity-30 grayscale pointer-events-none' : ''}`}>
-            <label className="text-white text-[10px] font-black opacity-80 uppercase tracking-widest block ml-2">Teacher Type</label>
-            <div className="grid grid-cols-1 gap-3">
-              {[TeacherType.SUNAO, TeacherType.AMANO].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setGameState(prev => ({ ...prev, teacher: t }))}
-                  className={`flex items-center gap-4 lg:gap-6 p-4 lg:p-6 rounded-[1.5rem] lg:rounded-[2rem] border-4 text-left transition-all transform active:scale-95 ${gameState.teacher === t ? 'bg-slate-500 border-white text-white shadow-[0_6px_0_#334155]' : 'bg-white/20 border-white/10 text-white hover:bg-white/30'}`}
-                >
-                  <div className={`w-10 h-10 lg:w-16 lg:h-16 rounded-full flex items-center justify-center font-black text-lg lg:text-2xl ${gameState.teacher === t ? 'bg-white text-slate-500' : 'bg-white/10 text-white/50'}`}>
-                    {t === TeacherType.SUNAO ? 'S' : 'A'}
-                  </div>
-                  <span className="font-black text-lg lg:text-3xl tracking-tight">{t === TeacherType.SUNAO ? 'すなお先生' : 'あまの先生'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="flex-1 flex flex-col p-6 lg:p-12 gap-6 min-h-[500px] lg:min-h-0 lg:overflow-hidden">
-        <div className="flex justify-between items-end shrink-0">
-          <div className="space-y-1">
-            <span className="text-white font-black opacity-40 text-lg tracking-widest uppercase italic">Import</span>
-            <h2 className="text-3xl lg:text-7xl font-black text-white drop-shadow-sm leading-none">写真を追加</h2>
-          </div>
-          <span className="text-white font-black opacity-50 text-sm lg:text-xl italic">MAX {MAX_IMAGES}</span>
-        </div>
-        <label className="block flex-1 min-h-[300px] lg:min-h-0 relative glossy-card rounded-[2.5rem] lg:rounded-[5rem] border-4 lg:border-8 border-white group overflow-hidden shadow-2xl cursor-pointer hover:scale-[1.01] active:scale-[0.99] transition-transform">
-          <input type="file" multiple accept="image/*" onChange={handleImageUpload} className="hidden" />
-          {gameState.images.length === 0 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-              <Upload className="w-16 h-16 lg:w-32 lg:h-32 text-sky-500 mb-4 group-hover:scale-110 transition-transform" />
-              <p className="text-xl lg:text-5xl font-black text-stone-600">写真をえらんでね</p>
-            </div>
-          ) : (
-            <div className="absolute inset-0 bg-stone-50 flex flex-col h-full">
-              <div className="flex-1 p-4 lg:p-6 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 lg:gap-4 overflow-y-auto custom-scrollbar">
-                {imageUrls.slice(0, 10).map((url, i) => (
-                  <div key={i} className="aspect-square rounded-2xl lg:rounded-3xl border-2 lg:border-4 border-white shadow-lg overflow-hidden bg-white">
-                    <img src={url} className="w-full h-full object-cover" alt="preview" />
-                  </div>
-                ))}
-                {imageUrls.length > 10 && (
-                  <div className="aspect-square rounded-2xl lg:rounded-3xl border-2 lg:border-4 border-dashed border-sky-400 bg-sky-50/50 flex flex-col items-center justify-center text-sky-600 shadow-inner">
-                    <span className="text-2xl lg:text-4xl font-black">+{imageUrls.length - 10}</span>
-                    <span className="text-xs lg:text-sm font-bold">More</span>
-                  </div>
-                )}
-              </div>
-              <div className="bg-sky-500 p-3 lg:p-5 text-center border-t-4 lg:border-t-8 border-sky-600 shadow-lg shrink-0 flex flex-col items-center justify-center gap-1">
-                <span className="text-white font-black text-base md:text-lg lg:text-3xl">{gameState.images.length} 枚セット完了！（タップで変更）</span>
-                {gameState.images.length > 20 && (
-                  <span className="text-white/90 font-bold text-xs lg:text-base">たくさん選ぶと、だいじなページの問題が出にくくなるよ</span>
-                )}
-              </div>
-            </div>
-          )}
-        </label>
-        <div className="flex flex-col sm:flex-row items-center gap-4 lg:gap-6 justify-between shrink-0 pb-8 lg:pb-0">
-          <p className="text-white text-lg lg:text-3xl font-black text-center sm:text-left drop-shadow-md">準備ができたらスタート！</p>
-          <Button
-            variant="game-orange"
-            size="lg"
-            onClick={startGeneration}
-            disabled={gameState.images.length === 0}
-            className="w-full sm:w-auto px-16 lg:px-40 rounded-full min-w-[280px] lg:min-w-[450px]"
-          >
-            はじめる! <ChevronRight size={32} className="lg:w-11 lg:h-11" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderPlaying = () => {
-    const question = gameState.questions[gameState.currentQuestionIndex];
-    return (
-      <div className="flex flex-col h-full w-full p-4 lg:p-10 overflow-y-auto md:overflow-hidden bg-gradient-to-b from-white via-sky-100 to-sky-400 relative">
-        <div className="absolute top-10 right-10 text-sky-300 opacity-20 pointer-events-none animate-pulse">
-          <Sparkles size={120} />
-        </div>
-        <div className="flex items-center gap-4 lg:gap-6 mb-4 lg:mb-8 shrink-0 relative z-10">
-          <Button variant="pill-black" size="sm" onClick={() => setIsQuitConfirmOpen(true)} className="px-4 lg:px-5 py-1 lg:py-2 border-2 min-w-0 !bg-white !text-stone-800 shadow-[0_4px_0_#ccc]">
-            <span className="font-black text-sm lg:text-lg">やめる</span>
-          </Button>
-          <ProgressBar current={gameState.currentQuestionIndex + 1} total={TOTAL_QUESTIONS} results={gameState.results} onSelectQuestion={jumpToQuestion} className="flex-1" />
-        </div>
-        <div className="flex-1 md:min-h-0 shrink-0 md:shrink bg-white/90 backdrop-blur-md border-4 lg:border-8 border-white rounded-[2.5rem] lg:rounded-[4rem] p-6 lg:p-12 flex items-center justify-center text-center mb-6 lg:mb-10 shadow-2xl md:overflow-y-auto custom-scrollbar relative z-10">
-          <h2 className="text-xl sm:text-3xl lg:text-6xl font-black text-stone-800 leading-tight max-w-5xl">
-            {question.question}
-          </h2>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-8 shrink-0 pb-2 relative z-10">
-          {question.options.map((option, idx) => (
-            <Button
-              key={idx}
-              variant={selectedAnswer === idx ? (idx === question.correctAnswerIndex ? 'game-yellow' : 'danger') : 'game-white'}
-              onClick={() => handleAnswer(idx)}
-              className={`h-auto min-h-[80px] lg:min-h-[140px] py-3 lg:py-6 px-4 lg:px-8 rounded-[1.2rem] lg:rounded-[3rem] border-4 flex items-center text-left !justify-start transition-all active:scale-95 ${getOptionFontSizeClass(option)}`}
-            >
-              <div className="w-10 h-10 lg:w-16 lg:h-16 bg-sky-500 rounded-full flex items-center justify-center text-white text-base lg:text-4xl mr-3 lg:mr-6 shrink-0 font-black shadow-lg">
-                {['A', 'B', 'C', 'D'][idx]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="leading-tight break-words block font-black text-left">{option}</span>
-              </div>
-            </Button>
-          ))}
-        </div>
-
-        {isQuitConfirmOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-8">
-            <div
-              className="absolute inset-0 bg-stone-900/60 backdrop-blur-md animate-in fade-in duration-300"
-              onClick={() => setIsQuitConfirmOpen(false)}
-            />
-            <div className="relative w-full max-w-md bg-white rounded-[2rem] lg:rounded-[3rem] shadow-2xl border-4 lg:border-8 border-white p-6 lg:p-10 flex flex-col items-center text-center animate-in zoom-in duration-300">
-              <h3 className="text-xl lg:text-3xl font-black text-stone-800 mb-3 lg:mb-4">
-                やめますか？
-              </h3>
-              <p className="text-stone-500 font-bold text-sm lg:text-lg mb-6 lg:mb-8">
-                ここでやめると、さいしょからになるよ。
-              </p>
-              <div className="flex flex-col gap-3 w-full">
-                <Button
-                  variant="danger"
-                  size="md"
-                  onClick={backToTitle}
-                  className="w-full rounded-full py-3 lg:py-5 text-lg lg:text-2xl"
-                >
-                  やめる
-                </Button>
-                <Button
-                  variant="game-white"
-                  size="md"
-                  onClick={() => setIsQuitConfirmOpen(false)}
-                  className="w-full rounded-full py-3 lg:py-5 text-lg lg:text-2xl border-stone-200"
-                >
-                  つづける
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderFeedback = () => {
-    const question = gameState.questions[gameState.currentQuestionIndex];
-    const isCorrect = gameState.results[gameState.results.length - 1].isCorrect;
-    return (
-      <div className={`flex flex-col h-full w-full items-center p-4 lg:p-10 transition-colors duration-500 ${isCorrect ? 'bg-teal-500' : 'bg-rose-500'}`}>
-        <div className="w-full max-w-5xl glossy-card rounded-[2.5rem] lg:rounded-[4rem] overflow-hidden border-4 lg:border-8 border-white/80 p-6 lg:p-10 flex flex-col h-full shadow-2xl">
-          <div className="text-center mb-4 shrink-0 flex items-center justify-center gap-4">
-            {isCorrect ? <Sparkles className="text-teal-400 w-8 h-8 lg:w-10 lg:h-10 animate-spin-slow" /> : null}
-            <h2 className={`text-3xl sm:text-5xl lg:text-8xl font-black italic drop-shadow-lg ${isCorrect ? 'text-teal-400' : 'text-rose-400'}`}>
-              {isCorrect ? 'せいかい！' : 'ざんねん...'}
-            </h2>
-          </div>
-          <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-4 lg:gap-6 mb-6">
-            <div className={`p-4 lg:p-6 rounded-[1.5rem] lg:rounded-[2.5rem] border-4 shrink-0 ${isCorrect ? 'bg-teal-50 border-teal-200' : 'bg-rose-50 border-rose-200'}`}>
-              <div className="flex items-center gap-2 mb-1 text-stone-400 uppercase font-black text-[10px] lg:text-sm tracking-widest">
-                <Target size={16} /> 正解
-              </div>
-              <p className="text-lg lg:text-5xl font-black text-stone-800 leading-tight">
-                {question.options[question.correctAnswerIndex]}
-              </p>
-            </div>
-            <div className="flex-1 bg-white/60 p-5 lg:p-10 rounded-[1.5rem] lg:rounded-[3rem] border-4 border-white shadow-inner flex flex-col overflow-y-auto custom-scrollbar">
-              <div className="flex items-center gap-2 mb-2 lg:mb-4 text-sky-500 uppercase font-black text-[10px] lg:text-sm tracking-widest">
-                <Info size={20} /> かいせつ
-              </div>
-              <p className="text-lg lg:text-4xl font-bold text-stone-700 leading-relaxed whitespace-pre-wrap">
-                {question.explanation}
-              </p>
-            </div>
-          </div>
-
-          {/* アクションエリア */}
-          <div className="mt-auto shrink-0 flex flex-col gap-3 lg:gap-4">
-            <Button
-              variant={isCorrect ? "game-white" : "game-yellow"}
-              size="md"
-              onClick={handleShowDetailedExplanation}
-              disabled={isCorrect}
-              className={`w-full rounded-full py-4 lg:py-6 text-lg lg:text-3xl !border-stone-200 transition-all ${isCorrect ? 'opacity-40 grayscale cursor-not-allowed shadow-none active:translate-y-0' : 'hover:scale-[1.02]'}`}
-            >
-              <MessageCircle className="w-6 h-6 lg:w-10 lg:h-10" />
-              <span>{isCorrect ? "（せいかいの人は押せません）" : "くわしい解説を見る！"}</span>
-            </Button>
-
-            <Button variant="game-orange" size="lg" onClick={nextQuestion} className="w-full rounded-full py-4 lg:py-8 text-xl lg:text-5xl">
-              {gameState.currentQuestionIndex + 1 >= TOTAL_QUESTIONS ? "結果を見る" : "つぎの問題へ"}
-            </Button>
-          </div>
-        </div>
-
-        {/* 詳細解説用ダイアログ（モーダル） */}
-        {isDetailedModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-8">
-            <div
-              className="absolute inset-0 bg-stone-900/60 backdrop-blur-md animate-in fade-in duration-300"
-              onClick={() => !isGeneratingDetailed && setIsDetailedModalOpen(false)}
-            />
-            <div className="relative w-full max-w-4xl bg-white rounded-[2rem] lg:rounded-[4rem] shadow-2xl border-4 lg:border-8 border-white overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in duration-300">
-              <div className="bg-sky-500 p-4 lg:p-8 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3 lg:gap-4 text-white">
-                  <BookOpen className="w-8 h-8 lg:w-12 lg:h-12" />
-                  <h3 className="text-2xl lg:text-5xl font-black">AI先生の特別じゅぎょう</h3>
-                </div>
-                {!isGeneratingDetailed && (
-                  <button
-                    onClick={() => setIsDetailedModalOpen(false)}
-                    className="bg-white/20 hover:bg-white/40 p-2 lg:p-4 rounded-full text-white transition-colors"
-                  >
-                    <X className="w-8 h-8 lg:w-10 lg:h-10" />
-                  </button>
-                )}
-              </div>
-
-              <div className="flex-1 p-6 lg:p-12 overflow-y-auto custom-scrollbar bg-stone-50">
-                {isGeneratingDetailed ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-6 py-20">
-                    <Loader2 className="w-16 h-16 lg:w-32 lg:h-32 animate-spin text-sky-500" />
-                    <p className="text-xl lg:text-4xl font-black text-stone-400 italic animate-pulse">
-                      とびっきりの解説を考えています...
-                    </p>
-                  </div>
-                ) : (
-                  <div className="prose prose-stone max-w-none">
-                    <p className="text-xl lg:text-4xl font-bold text-stone-700 leading-relaxed whitespace-pre-wrap">
-                      {activeDetailedExplanation}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 lg:p-8 bg-white border-t-2 border-stone-100 flex justify-center shrink-0">
-                <Button
-                  variant="game-orange"
-                  size="md"
-                  onClick={() => setIsDetailedModalOpen(false)}
-                  disabled={isGeneratingDetailed}
-                  className="px-12 lg:px-24 rounded-full"
-                >
-                  わかった！閉じる
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderSummary = () => {
-    const correctCount = gameState.results.filter(r => r.isCorrect).length;
-    return (
-      <div className="flex flex-col h-full w-full overflow-hidden bg-gradient-to-br from-sky-400 via-indigo-600 to-rose-400 relative">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-[-10%] left-[-5%] w-[40%] h-[40%] bg-white/10 rounded-full blur-[120px] animate-pulse"></div>
-          <div className="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] bg-amber-200/20 rounded-full blur-[120px]"></div>
-          <Sparkles className="absolute top-10 right-20 text-white/30 w-32 h-32 animate-spin-slow" />
-          <Star className="absolute bottom-20 left-20 text-yellow-300/20 w-24 h-24" />
-        </div>
-
-        <div className="flex flex-col w-full h-full max-w-[1700px] mx-auto p-4 lg:p-10 relative z-10">
-          <div className="flex justify-between items-center mb-4 lg:mb-8 shrink-0">
-            <div className="flex flex-col">
-              <span className="text-white/80 font-black text-lg lg:text-2xl tracking-[0.3em] uppercase italic">Victory Dashboard</span>
-              <h1 className="text-4xl lg:text-8xl font-black text-white italic tracking-tighter drop-shadow-2xl leading-none">チャレンジ結果</h1>
-            </div>
-            <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md px-6 py-3 rounded-full border border-white/20">
-              <Trophy className="text-yellow-400 w-8 h-8 lg:w-12 lg:h-12" />
-              <span className="text-white font-black text-xl lg:text-3xl">PERFECT CLEAR!</span>
-            </div>
-          </div>
-
-          <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-6 lg:gap-10">
-            <div className="lg:w-[420px] flex flex-col gap-6 shrink-0 h-full">
-              <div className="bg-white/15 backdrop-blur-3xl border-4 border-white/40 rounded-[3rem] p-8 lg:p-12 flex flex-col items-center justify-center shadow-2xl relative overflow-hidden flex-1 min-h-[220px]">
-                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent"></div>
-                <div className="text-white/60 font-black text-sm lg:text-lg uppercase tracking-widest mb-2 relative z-10">Score</div>
-                <div className="flex items-baseline gap-2 relative z-10">
-                  <span className="text-[7rem] lg:text-[10rem] font-black text-white leading-none tracking-tighter tabular-nums drop-shadow-xl">{correctCount}</span>
-                  <span className="text-3xl lg:text-5xl font-black text-white/30 italic">/10</span>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-6 lg:gap-5 pb-2 shrink-0">
-                <Button
-                  variant="game-orange"
-                  size="lg"
-                  onClick={startGeneration}
-                  className="w-full rounded-[2rem] py-8 lg:py-10 text-2xl lg:text-4xl shadow-[0_12px_0_#9a3412]"
-                >
-                  <Sparkles size={32} />
-                  <span>もういちど！</span>
-                </Button>
-                <Button
-                  variant="game-white"
-                  size="md"
-                  onClick={backToTitle}
-                  className="w-full rounded-[2rem] py-5 lg:py-7 text-xl lg:text-3xl border-white/20 text-stone-500 bg-white/90"
-                >
-                  <RotateCcw size={28} />
-                  <span>おわる</span>
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex-1 flex flex-col bg-white/95 rounded-[4rem] lg:rounded-[5rem] shadow-[0_30px_90px_-20px_rgba(0,0,0,0.5)] border-[8px] lg:border-[16px] border-white overflow-hidden relative">
-              <div className="bg-gradient-to-r from-sky-500 via-indigo-500 to-indigo-600 p-6 lg:p-10 shrink-0">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-white/20 p-3 rounded-2xl">
-                      <Sparkles className="text-white w-8 h-8 lg:w-12 lg:h-12" />
-                    </div>
-                    <div>
-                      <h2 className="text-white font-black text-2xl lg:text-5xl tracking-tight">AI先生のアドバイス</h2>
-                      <p className="text-white/50 text-xs lg:text-sm font-bold uppercase tracking-[0.2em] mt-1">Special Advice from Teacher</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 p-8 lg:p-12 xl:p-16 flex items-center justify-center relative bg-stone-50/50 overflow-hidden">
-                <span className="absolute top-4 left-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none pointer-events-none opacity-50">“</span>
-                <div className="max-w-[1400px] w-full relative z-10 py-6">
-                  {gameState.advice ? (
-                    <p className="text-stone-800 font-black text-2xl lg:text-5xl xl:text-6xl leading-[1.1] text-center italic drop-shadow-sm px-4">
-                      {gameState.advice}
-                    </p>
-                  ) : (
-                    <div className="flex flex-col items-center gap-6">
-                      <Loader2 className="w-16 h-16 lg:w-24 lg:h-24 animate-spin text-sky-400" />
-                      <p className="text-2xl lg:text-4xl font-black text-stone-300 italic">準備中です...</p>
-                    </div>
-                  )}
-                </div>
-                <span className="absolute bottom-4 right-6 text-sky-100 text-[12rem] lg:text-[20rem] font-black leading-none rotate-180 pointer-events-none opacity-50">“</span>
-              </div>
-
-              <div className="bg-stone-100/80 p-6 lg:p-10 flex flex-wrap items-center justify-center gap-8 lg:gap-16 border-t-2 border-stone-200 shrink-0">
-                <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
-                  <Target size={28} className="lg:w-10 lg:h-10 text-sky-400" /> Accuracy: {correctCount * 10}%
-                </div>
-                <div className="flex items-center gap-3 text-stone-400 font-black text-xl lg:text-3xl uppercase tracking-widest">
-                  <Star size={28} className="lg:w-10 lg:h-10 text-yellow-400" /> Grade: {correctCount >= 9 ? 'GOD' : correctCount >= 7 ? 'MASTER' : 'GOOD'}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="h-2 lg:h-4 shrink-0"></div>
-        </div>
-      </div>
-    );
-  };
+  const currentQuestion = gameState.questions[gameState.currentQuestionIndex];
+  const lastResult = gameState.results[gameState.results.length - 1];
 
   return (
-    <div className="h-full w-full select-none relative overflow-hidden bg-gradient-to-br from-[#4facfe] to-[#00f2fe]">
+    <div className="relative h-full w-full overflow-hidden">
       <ApiStatus />
+      <Modal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))}
+        title={modalState.title}
+        message={modalState.message}
+        type={modalState.type}
+      />
+
       {gameState.stage === AppStage.TITLE && (
-        <button
-          onClick={toggleFastRetry}
-          title="高速リトライ"
-          aria-label={`高速リトライ機能を${fastRetryEnabled ? 'オフ' : 'オン'}にする（現在: ${fastRetryEnabled ? 'オン' : 'オフ'}）`}
-          className={`fixed bottom-3 left-3 z-[60] w-2.5 h-2.5 rounded-full transition-all duration-300 hover:scale-150 ${
-            fastRetryEnabled
-              ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.9)] hover:shadow-[0_0_10px_rgba(52,211,153,1)]'
-              : 'bg-slate-800/80 hover:bg-slate-800'
-          }`}
+        <TitleScreen
+          mode={gameState.mode}
+          teacher={gameState.teacher}
+          imageCount={gameState.images.length}
+          imageUrls={imageUrls}
+          maxImages={MAX_IMAGES}
+          historyCount={history.length}
+          fastRetryEnabled={fastRetryEnabled}
+          onModeChange={mode => setGameState(prev => ({ ...prev, mode }))}
+          onTeacherChange={teacher => setGameState(prev => ({ ...prev, teacher }))}
+          onImagesSelected={handleImagesSelected}
+          onStart={startGeneration}
+          onOpenHistory={() => setGameState(prev => ({ ...prev, stage: AppStage.HISTORY }))}
+          onToggleFastRetry={toggleFastRetry}
         />
       )}
-      <Modal isOpen={modalState.isOpen} onClose={() => setModalState(prev => ({ ...prev, isOpen: false }))} title={modalState.title} message={modalState.message} type={modalState.type} />
-      <div className="h-full w-full flex flex-col">
-        {gameState.stage === AppStage.TITLE && renderTitle()}
-        {gameState.stage === AppStage.GENERATING && (
-          <div className="flex flex-col h-full w-full items-center justify-center text-white p-8 text-center bg-black/50 backdrop-blur-lg">
-            <Loader2 className="w-20 h-20 lg:w-48 lg:h-48 animate-spin text-yellow-300 mb-8" />
-            <p className="text-2xl lg:text-8xl font-black drop-shadow-xl animate-pulse uppercase italic">
-              {gameState.loadingMessage}
-            </p>
-          </div>
-        )}
-        {gameState.stage === AppStage.PLAYING && renderPlaying()}
-        {gameState.stage === AppStage.FEEDBACK && renderFeedback()}
-        {gameState.stage === AppStage.SUMMARY && renderSummary()}
-      </div>
+
+      {gameState.stage === AppStage.GENERATING && (
+        <GeneratingScreen message={gameState.loadingMessage} imageCount={gameState.images.length} />
+      )}
+
+      {gameState.stage === AppStage.PLAYING && currentQuestion && (
+        <PlayingScreen
+          question={currentQuestion}
+          index={gameState.currentQuestionIndex}
+          total={gameState.questions.length}
+          results={gameState.results}
+          selectedAnswer={selectedAnswer}
+          isReview={!!gameState.isReview}
+          isQuitConfirmOpen={isQuitConfirmOpen}
+          onAnswer={handleAnswer}
+          onJump={jumpToQuestion}
+          onQuit={() => setIsQuitConfirmOpen(true)}
+          onConfirmQuit={backToTitle}
+          onCancelQuit={() => setIsQuitConfirmOpen(false)}
+        />
+      )}
+
+      {gameState.stage === AppStage.FEEDBACK && currentQuestion && lastResult && (
+        <FeedbackScreen
+          question={currentQuestion}
+          isCorrect={lastResult.isCorrect}
+          chosenIndex={lastResult.chosenIndex}
+          isLast={gameState.currentQuestionIndex + 1 >= gameState.questions.length}
+          onNext={nextQuestion}
+          onShowDetail={handleShowDetailedExplanation}
+          detail={{
+            open: isDetailedModalOpen,
+            loading: isGeneratingDetailed,
+            text: activeDetailedExplanation,
+            onClose: () => setIsDetailedModalOpen(false),
+          }}
+        />
+      )}
+
+      {gameState.stage === AppStage.SUMMARY && (
+        <SummaryScreen
+          questions={gameState.questions}
+          results={gameState.results}
+          advice={gameState.advice}
+          isReview={!!gameState.isReview}
+          canPlayAgain={gameState.images.length > 0}
+          onRetryWrong={retryWrongFromSummary}
+          onPlayAgain={startGeneration}
+          onFinish={backToTitle}
+        />
+      )}
+
+      {gameState.stage === AppStage.HISTORY && (
+        <HistoryScreen
+          history={history}
+          onBack={() => setGameState(prev => ({ ...prev, stage: AppStage.TITLE }))}
+          onPracticeWrong={practiceFromHistory}
+          onClear={() => {
+            clearHistory();
+            setHistory([]);
+            setGameState(prev => ({ ...prev, stage: AppStage.TITLE }));
+          }}
+        />
+      )}
     </div>
   );
 };

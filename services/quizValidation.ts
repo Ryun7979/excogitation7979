@@ -58,6 +58,42 @@ export const copiesOriginal = (q: any): boolean => {
     .some((piece: string) => question.includes(piece));
 };
 
+// 正解の手がかり判定用: 記号・空白をのぞいて比べる
+const normalizeForHint = (s: string): string =>
+  s.normalize('NFKC').replace(/[\s「」『』()（）、。,.!?！？・:：]/g, '');
+
+const ANNOTATION = /[（(][^）)]*[）)]/;
+
+/**
+ * 選択肢の見た目から正解が分かってしまうか。プロンプトで禁止しているが守られないことがあるため、
+ * 誤判定で正しい問題を捨てすぎないよう、はっきりしたものだけを見つける。
+ * - 正解の選択肢にだけ（ふりがな・注釈）が付いている
+ * - 正解だけが極端に長い（他のどれよりも2倍以上、かつ10文字以上長い）
+ * - 正解の言葉（2文字以上）が問題文にそのまま書いてあり、不正解の言葉は書いていない
+ */
+export const revealsAnswer = (q: any): boolean => {
+  const options: string[] = q.options;
+  const correct = options[q.correctAnswerIndex];
+  const others = options.filter((_, i) => i !== q.correctAnswerIndex);
+
+  if (ANNOTATION.test(correct) && others.every(o => !ANNOTATION.test(o))) return true;
+
+  const longestOther = Math.max(...others.map(o => o.length));
+  if (correct.length >= longestOther * 2 && correct.length - longestOther >= 10) return true;
+
+  const question = normalizeForHint(q.question);
+  const inQuestion = (o: string) => {
+    const n = normalizeForHint(o);
+    return n.length >= 2 && question.includes(n);
+  };
+  if (inQuestion(correct) && !others.some(inQuestion)) return true;
+
+  return false;
+};
+
+/** 問題文の重複判定キー（空白・記号のゆれをなくす） */
+const questionKey = (q: any): string => normalizeForHint(q.question);
+
 /**
  * 同じ問題とみなすためのキー（正解＋選択肢の組）。
  * 「黄色を表す英単語は？」と「レモンの色を表す英単語は？」のように
@@ -117,15 +153,19 @@ export const sanitizeQuestions = (
 ): Omit<QuizQuestion, 'id'>[] => {
   if (!Array.isArray(data)) return [];
   const seen = new Set<string>();
+  const seenQuestions = new Set<string>();
   return data
     .map(reconcileAnswer)
     .filter(isPlayableQuestion)
     .filter(q => !refersToMaterial(q))
     .filter(q => !copiesOriginal(q))
+    .filter(q => !revealsAnswer(q))
     .filter(q => {
       const key = duplicateKey(q);
-      if (seen.has(key)) return false;
+      const qKey = questionKey(q);
+      if (seen.has(key) || seenQuestions.has(qKey)) return false;
       seen.add(key);
+      seenQuestions.add(qKey);
       return true;
     })
     .slice(0, total)

@@ -6,14 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --import ./scripts/ts-resolve-hook.mjs --test \"services/**/*.test.ts\" \"server/**/*.test.ts\"",
+    "eval": "node --env-file-if-exists=.env.local --experimental-transform-types --disable-warning=ExperimentalWarning --import ./scripts/ts-resolve-hook.mjs scripts/eval-quiz.ts"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "recharts": "^3.7.0"
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",

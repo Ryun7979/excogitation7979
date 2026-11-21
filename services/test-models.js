@@ -1,4 +1,4 @@
-const apiKey = process.env.VITE_GEMINI_API_KEY;
+const apiKey = process.env.GEMINI_API_KEY;
 
 async function listModels() {
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;

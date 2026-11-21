@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -134,4 +134,36 @@ test('shuffleOptions: 正解の位置がばらける', () => {
 test('shuffleOptions: 「すべて」等を含む問題は並べ替えない', () => {
   const q = { ...valid(0), options: ['A', 'B', 'C', 'すべて正しい'], correctAnswerIndex: 3 };
   assert.deepEqual(shuffleOptions(q), q);
+});
+
+const q4 = (question: string, options: string[], correctAnswerIndex = 0) => ({ question, options, correctAnswerIndex });
+
+test('revealsAnswer: 正解にだけ（ふりがな）が付いていたら答えが分かる', () => {
+  assert.equal(revealsAnswer(q4('江戸幕府を開いた人は？', ['徳川家康（とくがわいえやす）', '織田信長', '豊臣秀吉', '源頼朝'])), true);
+  assert.equal(revealsAnswer(q4('江戸幕府を開いた人は？', ['徳川家康（とくがわいえやす）', '織田信長（おだのぶなが）', '豊臣秀吉（とよとみひでよし）', '源頼朝（みなもとのよりとも）'])), false, '全部に付いていればよい');
+});
+
+test('revealsAnswer: 正解だけ極端に長いと答えが分かる', () => {
+  assert.equal(revealsAnswer(q4('植物が育つのに必要なのは？', ['日光と水と空気と適当な温度と肥料', '砂', '石', '鉄'])), true);
+  assert.equal(revealsAnswer(q4('「生える」の読み方は？', ['はえる', 'うまれる', 'いきる', 'おえる'])), false);
+});
+
+test('revealsAnswer: 正解の言葉が問題文に書いてあると答えが分かる', () => {
+  assert.equal(revealsAnswer(q4('「税金」の「税金」はどれ？', ['税金', '料金', '現金', '貯金'])), true);
+  assert.equal(revealsAnswer(q4('47 + 35 はいくつ？', ['82', '72', '712', '83'])), false);
+  assert.equal(revealsAnswer(q4('「春」を英語で言うと？', ['spring', 'winter', 'summer', 'fall'])), false);
+  assert.equal(revealsAnswer(q4('「海」と「山」のうち、しょっぱい水があるのは？', ['海', '山', '川', '池'])), false, '1文字の選択肢は比べない');
+});
+
+test('sanitizeQuestions: 問題文が同じ（空白・記号のちがいだけ）問題は1つだけ残る', () => {
+  const a = q4('「海」の読み方はどれ？', ['うみ', 'かい', 'あま', 'み'], 0);
+  const b = q4('「海」の 読み方は どれ?', ['うみ', 'かい', 'あお', 'なみ'], 0);
+  const out = sanitizeQuestions([a, b, ...Array.from({ length: 10 }, (_, i) => valid(i))], 12);
+  assert.equal(out.filter(q => q.question.includes('海')).length, 1);
+});
+
+test('sanitizeQuestions: 答えが分かる問題は除外される', () => {
+  const giveaway = q4('「税金」の「税金」はどれ？', ['税金', '料金', '現金', '貯金']);
+  const out = sanitizeQuestions([giveaway, valid(1)], 10);
+  assert.deepEqual(out.map(q => q.question), ['問題1']);
 });

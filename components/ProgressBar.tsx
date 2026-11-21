@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { QuizResult } from '../types';
 
@@ -10,37 +9,44 @@ interface ProgressBarProps {
   onSelectQuestion?: (index: number) => void;
 }
 
+/** 何問目か と、これまでの正解・不正解のランプ。答えたランプを押すとその問題からやり直せる */
 export const ProgressBar: React.FC<ProgressBarProps> = ({ current, total, results, className = '', onSelectQuestion }) => {
-  const answeredCount = results.length;
-  const percentage = Math.min(100, (answeredCount / total) * 100);
   const lamps = Array.from({ length: total }, (_, i) => results[i]);
 
   return (
-    <div className={`w-full shrink-0 ${className}`}>
-      <div className="flex justify-between items-baseline text-sky-900 font-black mb-2 lg:mb-4 px-2 lg:px-4 drop-shadow-md">
-         <span className="text-xl sm:text-2xl lg:text-4xl tracking-tighter">だい {current} もん / 全 {total} 問</span>
-         <span className="text-lg sm:text-xl lg:text-3xl tabular-nums">{Math.round(percentage)}%</span>
-      </div>
-      <div className="flex justify-center gap-1 sm:gap-1.5 lg:gap-2 px-2 lg:px-4">
+    <div className={`min-w-0 ${className}`}>
+      <p className="mb-fl-1 text-fl-lg font-black text-white" aria-live="polite">
+        だい {current} もん <span className="text-fl-base font-bold text-white/85">/ {total} もん</span>
+      </p>
+      <ol className="flex flex-wrap gap-1" aria-label="これまでの結果">
         {lamps.map((result, i) => {
-          const baseShape = 'w-3.5 h-3.5 sm:w-4 sm:h-4 lg:w-6 lg:h-6 aspect-square rounded sm:rounded-md lg:rounded-lg border sm:border-2 transition-colors duration-300 shadow-inner';
-          const clickable = !!result && !!onSelectQuestion;
-          const interactiveClass = clickable ? 'cursor-pointer hover:scale-125 hover:brightness-110' : '';
+          const shape = 'block h-[clamp(0.75rem,2.4vmin,1.25rem)] w-[clamp(0.75rem,2.4vmin,1.25rem)] rounded-md border-2';
           if (!result) {
-            return <div key={i} className={`${baseShape} bg-white/40 border-sky-300`} />;
+            const isCurrent = i === current - 1;
+            return (
+              <li key={i} className="grid h-8 w-6 place-items-center sm:w-8">
+                <span className={`${shape} ${isCurrent ? 'border-amber-300 bg-white' : 'border-white/50 bg-white/20'}`} aria-label={`第${i + 1}問${isCurrent ? '（いまの問題）' : ''}`} />
+              </li>
+            );
           }
+          const label = `第${i + 1}問 ${result.isCorrect ? 'せいかい' : 'まちがい'}。押すとこの問題からやり直す`;
           return (
-            <button
-              key={i}
-              type="button"
-              disabled={!clickable}
-              onClick={() => clickable && onSelectQuestion(i)}
-              title={clickable ? `第${i + 1}問にもどってやり直す` : undefined}
-              className={`${baseShape} ${interactiveClass} ${result.isCorrect ? 'bg-teal-400 border-teal-200' : 'bg-rose-400 border-rose-200'}`}
-            />
+            <li key={i}>
+              {/* ランプは小さいので、押せる範囲は 32px 角とる */}
+              <button
+                type="button"
+                disabled={!onSelectQuestion}
+                onClick={() => onSelectQuestion?.(i)}
+                aria-label={label}
+                title={label}
+                className="grid h-8 w-6 place-items-center rounded-md hover:bg-white/20 sm:w-8"
+              >
+                <span className={`${shape} ${result.isCorrect ? 'border-teal-100 bg-teal-400' : 'border-rose-100 bg-rose-400'}`} />
+              </button>
+            </li>
           );
         })}
-      </div>
+      </ol>
     </div>
   );
 };

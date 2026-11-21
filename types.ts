@@ -5,6 +5,7 @@ export enum AppStage {
   ANALYZING = 'ANALYZING', // New stage for generating advice
   FEEDBACK = 'FEEDBACK',
   SUMMARY = 'SUMMARY',
+  HISTORY = 'HISTORY', // 学習のきろく
   ERROR = 'ERROR'
 }
 
@@ -39,6 +40,7 @@ export interface QuizResult {
   questionIndex: number;
   isCorrect: boolean;
   timeTakenSeconds: number;
+  chosenIndex?: number; // えらんだ選択肢
 }
 
 export interface GameState {
@@ -48,6 +50,8 @@ export interface GameState {
   images: File[];
   imageStats: ImageStat[]; // imagesと同じ長さ・並びの統計情報
   questions: QuizQuestion[];
+  /** まちがえた問題の解き直し中か（AIを呼ばず、画像の統計も変えない） */
+  isReview?: boolean;
   currentQuestionIndex: number;
   results: QuizResult[];
   advice?: string; // AI generated advice
@@ -55,4 +59,5 @@ export interface GameState {
   loadingMessage?: string; // Message to show during loading states
 }
 
+/** AIに作らせる1回分の問題数（解き直しでは、まちがえた問題の数になる） */
 export const TOTAL_QUESTIONS = 10;

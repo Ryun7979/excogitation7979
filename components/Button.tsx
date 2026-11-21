@@ -1,42 +1,48 @@
-
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'game-yellow' | 'game-white' | 'game-orange' | 'danger' | 'pill-black';
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  /**
+   * primary: いちばん押してほしいボタン（1画面に1つ）
+   * secondary: 白いボタン
+   * danger: やめる・消すなど
+   * ghost: 色の濃い背景の上に置く、目立たないボタン
+   */
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
   fullWidth?: boolean;
 }
 
-export const Button: React.FC<ButtonProps> = ({ 
-  children, 
-  variant = 'primary', 
-  size = 'md', 
+const VARIANTS = {
+  primary: 'bg-amber-400 text-slate-900 shadow-[0_5px_0_#b45309] hover:bg-amber-300',
+  secondary: 'bg-white text-ink ring-2 ring-inset ring-slate-300 shadow-[0_5px_0_#cbd5e1] hover:bg-slate-50',
+  danger: 'bg-ng text-white shadow-[0_5px_0_#881337] hover:bg-rose-600',
+  ghost: 'bg-white/15 text-white ring-2 ring-white/40 hover:bg-white/25',
+};
+
+const SIZES = {
+  sm: 'min-h-[44px] px-fl-3 py-fl-1 text-fl-base',
+  md: 'min-h-[52px] px-fl-4 py-fl-2 text-fl-lg',
+  lg: 'min-h-[60px] px-fl-4 py-fl-2 text-fl-xl',
+};
+
+export const Button: React.FC<ButtonProps> = ({
+  children,
+  variant = 'primary',
+  size = 'md',
   fullWidth = false,
   className = '',
-  ...props 
+  type = 'button',
+  ...props
 }) => {
-  const baseStyles = "font-black transition-all duration-75 flex items-center justify-center gap-3 select-none transform active:translate-y-1 active:shadow-none whitespace-normal border-2 lg:border-4 border-black/10";
-  
-  const variants = {
-    primary: "bg-sky-500 text-white shadow-[0_8px_0_#0369a1] hover:bg-sky-400",
-    'game-yellow': "bg-[#fcd34d] text-stone-800 shadow-[0_8px_0_#ca8a04] hover:bg-[#fde047]",
-    'game-white': "bg-white text-stone-600 shadow-[0_8px_0_#d6d3d1] hover:bg-stone-50",
-    'game-orange': "bg-[#f97316] text-white shadow-[0_10px_0_#9a3412] hover:bg-[#fb923c]",
-    'danger': "bg-rose-500 text-white shadow-[0_8px_0_#9f1239] hover:bg-rose-400",
-    'pill-black': "bg-stone-800 text-white shadow-[0_4px_0_#000] rounded-full px-8",
-  };
-
-  const sizes = {
-    sm: "px-6 py-3 text-lg lg:text-xl rounded-2xl", 
-    md: "px-8 py-4 text-xl lg:text-3xl rounded-[1.5rem]",
-    lg: "px-10 py-5 text-2xl lg:text-4xl rounded-[2.5rem]",
-    xl: "px-14 py-8 text-3xl lg:text-6xl rounded-[3.5rem]",
-  };
-
-  const disabledStyle = props.disabled ? "opacity-50 grayscale cursor-not-allowed shadow-none translate-y-1" : "";
-
+  const pressable = props.disabled
+    ? 'opacity-50 cursor-not-allowed shadow-none'
+    : 'active:translate-y-[3px] active:shadow-none';
   return (
-    <button className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${fullWidth ? 'w-full' : ''} ${disabledStyle} ${className}`} {...props}>
+    <button
+      type={type}
+      className={`inline-flex items-center justify-center gap-2 rounded-btn font-black transition-[transform,background-color] duration-75 ${VARIANTS[variant]} ${SIZES[size]} ${pressable} ${fullWidth ? 'w-full' : ''} ${className}`}
+      {...props}
+    >
       {children}
     </button>
   );

@@ -1,54 +1,27 @@
-
 import React, { useEffect, useState } from 'react';
-import { Battery, Loader2, AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { getApiStatus } from '../services/geminiService';
 
+/** AI が考えている間だけ、右上に小さく知らせる（いつも出していると画面の表示と重なるため） */
 export const ApiStatus: React.FC = () => {
-  const [status, setStatus] = useState<{ status: 'ok' | 'busy' | 'warning' | 'error', label?: string, remaining?: number }>({ status: 'ok' });
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const checkStatus = () => {
-      setStatus(getApiStatus());
-    };
-    
-    checkStatus();
-    const interval = setInterval(checkStatus, 500); 
-    
+    const check = () => setBusy(getApiStatus().status === 'busy');
+    check();
+    const interval = setInterval(check, 500);
     return () => clearInterval(interval);
   }, []);
 
-  const isHealthy = status.status === 'ok';
-  const isBusy = status.status === 'busy';
+  if (!busy) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-[100] flex flex-col items-end pointer-events-none">
-      {(isHealthy || isBusy) ? (
-        <div className="bg-stone-900/40 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-white/20 shadow-lg pointer-events-auto group transition-all hover:bg-stone-900/60">
-          {isBusy ? (
-            <>
-              <Loader2 className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
-              <span className="text-[10px] font-black text-white uppercase tracking-tighter">AIが考え中</span>
-            </>
-          ) : (
-            <>
-              <div className="w-2.5 h-2.5 bg-teal-400 rounded-full shadow-[0_0_8px_#2dd4bf] animate-pulse" />
-              <span className="text-[10px] font-black text-white/80 uppercase tracking-tighter opacity-0 group-hover:opacity-100 transition-opacity">AI 準備完了</span>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border-4 font-black shadow-xl animate-bounce pointer-events-auto ${
-          status.status === 'error' ? 'bg-rose-500 text-white border-white' : 'bg-yellow-400 text-stone-800 border-white'
-        }`}>
-          {status.status === 'error' ? <AlertCircle className="w-5 h-5" /> : <Battery className="w-5 h-5" />}
-          <span className="text-sm">
-            {status.label} 
-            {status.status === 'error' && status.remaining && (
-              <span className="ml-1">({status.remaining}秒)</span>
-            )}
-          </span>
-        </div>
-      )}
+    <div
+      role="status"
+      className="pointer-events-none fixed right-[max(0.75rem,env(safe-area-inset-right))] top-[max(0.75rem,env(safe-area-inset-top))] z-[90] flex items-center gap-2 rounded-full bg-slate-900/75 px-3 py-1.5 text-fl-xs font-bold text-white shadow-lg"
+    >
+      <Loader2 className="h-4 w-4 animate-spin text-amber-300" aria-hidden="true" />
+      AIが考え中
     </div>
   );
 };

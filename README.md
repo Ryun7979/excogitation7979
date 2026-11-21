@@ -1,20 +1,24 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# AIクイズ — 写真から4択クイズ
 
-# Run and deploy your AI Studio app
+教材（ドリル・教科書など）の写真から、AI（Gemini）が4択クイズを作るアプリです。
 
-This contains everything you need to run your app locally.
+## 手元で動かす
 
-View your app in AI Studio: https://ai.studio/apps/drive/1I5d-JHtq_D4BKUjh8-jQ7pL0OFy3d0GS
+**必要なもの:** Node.js 22.6 以上
 
-## Run Locally
+1. `npm install`
+2. `.env.local` に Gemini の API キーを書く（`VITE_` は付けない。キーは画面側には渡らない）
 
-**Prerequisites:**  Node.js
+   ```
+   GEMINI_API_KEY=ここにキー
+   ```
 
+3. `npm run dev`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+テストは `npm test` で動きます。
+
+## ドキュメント
+
+- [docs/README.md](docs/README.md) — ドキュメントの入口
+- [docs/deploy.md](docs/deploy.md) — しくみと公開のしかた（Vercel）
+- [docs/tasks/README.md](docs/tasks/README.md) — 改善タスクの一覧と経過
