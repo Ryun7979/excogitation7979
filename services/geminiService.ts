@@ -263,11 +263,15 @@ const baseQuestionProperties = {
 // 選択肢より先に「途中式・根拠」と「正解」を書かせる。軽量モデルは選択肢を並べてから
 // 正解番号を選ぶと 61+9 の正解を 69 にするなどの取り違えをするため。
 // answer はコード側で選択肢と照合し、correctAnswerIndex を付け直す（quizValidation.reconcileAnswer）
+// asks: 問題文が「何を」選ばせているかを言い直させる。basis で正しく調べても、
+// 問題文を書くときに向きが逆になる（「くり上がりがある式は？」に、くり上がりの無い式を正解にする）ことがあるため。
+// answer は basis ではなく、この asks に合うものを選ばせる
 const answerFirstProperties = {
-  solution: { type: Type.STRING, description: "正解を出すための途中式・根拠（計算なら式と答え、知識なら教材に書いてある事実）を短く" },
-  answer: { type: Type.STRING, description: "正解。このあと options に、この文字列と一字一句同じ選択肢を必ず1つ入れる" },
+  asks: { type: Type.STRING, description: "直前の問題文が選ばせているものを言い直す。「〜である/ない」「本当/ウソ」「同じ/ちがう」の向きをはっきり書く（例: くり上がりが『ある』式を選ぶ / 『ウソ』の文を選ぶ）" },
+  solution: { type: Type.STRING, description: "asks の条件で4つの選択肢候補を1つずつ判定し、正解を出す途中式・根拠（計算なら式と答え、知識なら教材に書いてある事実）を短く" },
+  answer: { type: Type.STRING, description: "asks に当てはまる正解。問題文と食い違うときは、問題文を書き直すのではなく asks に合うものを正解にする。このあと options に、この文字列と一字一句同じ選択肢を必ず1つ入れる" },
 };
-const baseQuestionKeys = ["question", "solution", "answer", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
+const baseQuestionKeys = ["question", "asks", "solution", "answer", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
 
 // あまの先生用: 問題文より先に「元ネタ」と「どう変えたか」を書かせる。
 // 軽量モデル＋思考最小だと、先に書き出させないと元の問題をそのまま写しがちなため。
@@ -418,7 +422,7 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
   const now = Date.now();
   return questions.map((q, i) => {
     // 作問メモ（あまの先生の originalContent 等、クイズモードの quizStyle 等）はゲームには不要なので取り除く
-    const { originalContent, learningTheme, twist, quizStyle, hook, basis, solution, answer, ...rest } = q as any;
+    const { originalContent, learningTheme, twist, quizStyle, hook, basis, asks, solution, answer, ...rest } = q as any;
     if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
     if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook} / 根拠: ${basis}`);
     // AIは正解を前の方に置きがちなので、選択肢の並びをシャッフルする
