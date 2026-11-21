@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -67,6 +67,20 @@ test('正解と選択肢が同じ重複問題は1つだけ残る', () => {
   const c = { ...valid(3), question: '「赤」を表す英単語は？', options: ['red', 'yellow', 'blue', 'green'], correctAnswerIndex: 0 };
   const out = sanitizeQuestions([a, b, c], 10);
   assert.deepEqual(out.map(q => q.question), [a.question, c.question]);
+});
+
+test('あまの先生: 元画像の問題の丸写しは除外される', () => {
+  const q = (originalContent: string, question: string) => ({ ...valid(1), originalContent, question });
+  assert.equal(copiesOriginal(q('5+60', '5 + 60 はいくつですか。')), true);
+  assert.equal(copiesOriginal(q('16+4、33+7', '33＋7 はいくつ？')), true);
+  assert.equal(copiesOriginal(q('7×4=', '7 x 4 はいくつ？')), true);
+  // 数値を変えた応用問題は残す
+  assert.equal(copiesOriginal(q('5+60', '7 + 80 はいくつですか。')), false);
+  // 短い語句（「生」など）や年号は比べない
+  assert.equal(copiesOriginal(q('生', '「生える」の読み方は？')), false);
+  assert.equal(copiesOriginal(q('1603年、江戸幕府', '1603年に幕府を開いた人物は？')), false);
+  // originalContent が無い（すなお先生・クイズモード）ならそのまま
+  assert.equal(copiesOriginal(valid(1)), false);
 });
 
 test('正解インデックスが範囲外・非整数なら除外される', () => {

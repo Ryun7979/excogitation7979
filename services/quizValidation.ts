@@ -37,6 +37,27 @@ const MATERIAL_REFERENCE = /(?<![ァ-ヶー])ワーク|ドリル|教材|プリ�
 export const refersToMaterial = (q: any): boolean =>
   typeof q?.question === 'string' && MATERIAL_REFERENCE.test(q.question);
 
+// 丸写し判定用の正規化: 全角/半角・空白・記号のゆれをなくす
+const normalizeForCopy = (s: string): string =>
+  s.normalize('NFKC').replace(/[\s=＝?？。、,.「」『』()（）□]/g, '').replace(/[x*]/g, '×');
+
+/**
+ * あまの先生の問題が、元画像の問題の丸写しになっていないか。
+ * AIが先に書いた originalContent（元の問題・数値・語句）の各項目が、問題文にそのまま
+ * 含まれていたら丸写しとみなす（例: 元「5+60」→ 問題「5 + 60 はいくつですか」）。
+ * 誤判定で正しい問題を捨てないよう、計算式（7×4 など）か、8文字以上の項目だけを比べる。
+ * 年号（1603年）や短い語句は、応用問題でも使うのが自然なので比べない（捨てすぎると問題が足りなくなる）
+ */
+export const copiesOriginal = (q: any): boolean => {
+  if (typeof q?.originalContent !== 'string' || typeof q?.question !== 'string') return false;
+  const question = normalizeForCopy(q.question);
+  return q.originalContent
+    .split(/[、,，/／\n;；]/)
+    .map(normalizeForCopy)
+    .filter((piece: string) => (piece.length >= 3 && /\d[+\-−×÷/]\d/.test(piece)) || piece.length >= 8)
+    .some((piece: string) => question.includes(piece));
+};
+
 /**
  * 同じ問題とみなすためのキー（正解＋選択肢の組）。
  * 「黄色を表す英単語は？」と「レモンの色を表す英単語は？」のように
@@ -100,6 +121,7 @@ export const sanitizeQuestions = (
     .map(reconcileAnswer)
     .filter(isPlayableQuestion)
     .filter(q => !refersToMaterial(q))
+    .filter(q => !copiesOriginal(q))
     .filter(q => {
       const key = duplicateKey(q);
       if (seen.has(key)) return false;

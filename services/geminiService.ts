@@ -136,14 +136,14 @@ const ADVICE_POOL: Record<number, string[]> = {
 };
 
 // --- Utility: Image Resizing for Token Optimization ---
-// Geminiは縦横とも384px以下の画像を最小トークン数(258)で処理する。
-// 384を超えるとタイル分割されてトークン数が数倍になるため、通常は384に収める
-const QUIZ_IMAGE_MAX_SIZE = 384;
-// 2フェーズ生成の画像解析だけは高解像度で送る。384だとドリルの小さな文字
+// Geminiは縦横とも384px以下の画像を最小トークン数(258)で処理し、それを超えると
+// タイル分割でトークン数が数倍になる。それでも 1024px で送る。384だとドリルの小さな文字
 // （例文の漢字・計算式）が読めず、大きな見出しの字だけから出題されたり
-// 「枝」を「技」と読み違えたりするため。解析結果はキャッシュされるので送信は1回きり
-const ANALYSIS_IMAGE_MAX_SIZE = 1024;
-const resizeImage = async (file: File, maxWidth = QUIZ_IMAGE_MAX_SIZE): Promise<string> => {
+// 「枝」を「技」と読み違えたりするため。
+// - 2フェーズ生成（高速リトライON）: 解析結果がキャッシュされるので送信は1回きり
+// - 1フェーズ生成（高速リトライOFF）: 再試行のたびに送り直すが、読めないよりは良い
+const IMAGE_MAX_SIZE = 1024;
+const resizeImage = async (file: File, maxWidth = IMAGE_MAX_SIZE): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = URL.createObjectURL(file);
@@ -439,13 +439,13 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
 async function generateQuizSinglePhase(
   ai: GoogleGenAI,
   attemptIndices: number[],
-  getResizedBase64: (fileIndex: number) => Promise<string>,
+  getResizedBase64: (fileIndex: number, maxSize?: number) => Promise<string>,
   prompt: string,
   quizSchema: object,
   modelName: string,
 ): Promise<QuizQuestion[]> {
   const imageParts = await Promise.all(attemptIndices.map(async i => ({
-    inlineData: { data: await getResizedBase64(i), mimeType: "image/jpeg" }
+    inlineData: { data: await getResizedBase64(i, IMAGE_MAX_SIZE), mimeType: "image/jpeg" }
   })));
   const response = await ai.models.generateContent({
     model: modelName,
@@ -479,7 +479,7 @@ async function generateQuizTwoPhase(
     );
     console.log(`Analyzing ${uncached.length}/${attemptIndices.length} images (rest reused from cache)`);
     const imageParts = await Promise.all(uncached.map(async i => ({
-      inlineData: { data: await getResizedBase64(i, ANALYSIS_IMAGE_MAX_SIZE), mimeType: "image/jpeg" }
+      inlineData: { data: await getResizedBase64(i, IMAGE_MAX_SIZE), mimeType: "image/jpeg" }
     })));
     const response = await ai.models.generateContent({
       model: modelName,
@@ -549,7 +549,7 @@ export const generateQuizFromImages = async (
   const resizedCache = new Map<string, string>();
   const getResizedBase64 = async (
     fileIndex: number,
-    maxSize: number = QUIZ_IMAGE_MAX_SIZE
+    maxSize: number = IMAGE_MAX_SIZE
   ): Promise<string> => {
     const key = `${fileIndex}@${maxSize}`;
     let base64 = resizedCache.get(key);
