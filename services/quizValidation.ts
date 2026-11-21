@@ -29,6 +29,22 @@ export const isPlayableQuestion = (q: any): boolean =>
   q.correctAnswerIndex >= 0 &&
   q.correctAnswerIndex < OPTION_COUNT;
 
+// 元の教材そのものを指す言葉。子供は教材を見ずに遊ぶので、これを含む問題は捨てる。
+// 「ネットワーク」「チームワーク」などは対象外にするため、カタカナに続く「ワーク」は除く
+const MATERIAL_REFERENCE = /(?<![ァ-ヶー])ワーク|ドリル|教材|プリント|画像/;
+
+/** 問題文が元の教材（ワーク・ドリル・画像など）を指しているか */
+export const refersToMaterial = (q: any): boolean =>
+  typeof q?.question === 'string' && MATERIAL_REFERENCE.test(q.question);
+
+/**
+ * 同じ問題とみなすためのキー（正解＋選択肢の組）。
+ * 「黄色を表す英単語は？」と「レモンの色を表す英単語は？」のように
+ * 問題文の言い回しだけ違う重複も、正解と選択肢が同じなら同じ問題とみなす
+ */
+const duplicateKey = (q: any): string =>
+  `${normalizeOption(q.options[q.correctAnswerIndex])}|${q.options.map(normalizeOption).sort().join('/')}`;
+
 // 「すべて正しい」「上のどれでもない」など、選択肢の位置や他の選択肢に依存するもの。
 // これを含む問題は並べ替えると意味が崩れるので、そのままにする
 const POSITION_DEPENDENT_OPTION = /すべて|全部|ぜんぶ|どれも|いずれも|以上|上の|両方|りょうほう/;
@@ -79,9 +95,17 @@ export const sanitizeQuestions = (
   total: number
 ): Omit<QuizQuestion, 'id'>[] => {
   if (!Array.isArray(data)) return [];
+  const seen = new Set<string>();
   return data
     .map(reconcileAnswer)
     .filter(isPlayableQuestion)
+    .filter(q => !refersToMaterial(q))
+    .filter(q => {
+      const key = duplicateKey(q);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .slice(0, total)
     .map((q: any) => ({
       ...q,

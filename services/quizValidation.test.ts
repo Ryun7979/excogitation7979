@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
-  options: ['A', 'B', 'C', 'D'],
+  options: [`A${n}`, `B${n}`, `C${n}`, `D${n}`],
   correctAnswerIndex: n % 4,
   explanation: '解説',
   targetAge: '小学3年生',
@@ -48,6 +48,25 @@ test('reconcileAnswer: answer がどの選択肢とも一致しなければ除�
 test('reconcileAnswer: answer が無ければそのまま', () => {
   const q = valid(2);
   assert.equal(reconcileAnswer(q), q);
+});
+
+test('教材そのものを指す問題は除外される', () => {
+  const q = (question: string) => ({ ...valid(1), question });
+  assert.equal(refersToMaterial(q('ワークに載っている動物のうち、なかまはずれはどれ？')), true);
+  assert.equal(refersToMaterial(q('ドリルで練習する漢字はどれ？')), true);
+  assert.equal(refersToMaterial(q('画像の3番は何？')), true);
+  assert.equal(refersToMaterial(q('次の動物のうち、なかまはずれはどれ？')), false);
+  // カタカナ語の一部としての「ワーク」は対象外
+  assert.equal(refersToMaterial(q('チームワークの意味はどれ？')), false);
+  assert.equal(sanitizeQuestions([q('教材に出てくる色はどれ？'), q('黄色はどれ？')], 10).length, 1);
+});
+
+test('正解と選択肢が同じ重複問題は1つだけ残る', () => {
+  const a = { ...valid(1), question: '「黄色」を表す英単語は？', options: ['red', 'yellow', 'blue', 'green'], correctAnswerIndex: 1 };
+  const b = { ...valid(2), question: 'レモンの色を表す英単語は？', options: ['green', 'blue', 'yellow', 'red'], correctAnswerIndex: 2 };
+  const c = { ...valid(3), question: '「赤」を表す英単語は？', options: ['red', 'yellow', 'blue', 'green'], correctAnswerIndex: 0 };
+  const out = sanitizeQuestions([a, b, c], 10);
+  assert.deepEqual(out.map(q => q.question), [a.question, c.question]);
 });
 
 test('正解インデックスが範囲外・非整数なら除外される', () => {
