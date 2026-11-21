@@ -242,7 +242,7 @@ async function queuedRequest<T>(operation: () => Promise<T>): Promise<T> {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const baseQuestionProperties = {
-  question: { type: Type.STRING, description: "クイズの問題文。元の画像を見なくても答えられるよう、必要な情報はすべて文中に書き込む（「画像の」「この図で」等は使わない）" },
+  question: { type: Type.STRING, description: "クイズの問題文。教材で学んでいる中身（漢字・計算・語句・知識）を問う。元の画像を見なくても答えられるよう必要な情報はすべて文中に書き込む（「画像の」「何番の」等の紙面を指す言葉は使わない）" },
   options: {
     type: Type.ARRAY,
     items: { type: Type.STRING },
@@ -253,7 +253,7 @@ const baseQuestionProperties = {
   correctAnswerIndex: { type: Type.INTEGER, description: "正解のインデックス(0-3)" },
   explanation: { type: Type.STRING, description: "解説文（100文字程度）" },
   targetAge: { type: Type.STRING, description: "推定対象学年" },
-  sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった画像の番号（送信された画像の0始まりインデックス）" },
+  sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった元ネタ（画像）の番号（送信順の0始まり）。この番号は記録用で、問題文には出さない" },
 };
 const baseQuestionKeys = ["question", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
 
@@ -356,21 +356,34 @@ const analysisSchema = {
   items: {
     type: Type.OBJECT,
     properties: {
+      // 先に教材の種類を書かせ、要約が「紙面の説明」ではなく「学習内容の書き出し」になるようにする
+      materialType: {
+        type: Type.STRING,
+        description: "教材の種類と学年の目安（例: 小3の漢字ドリル、小2の計算ドリル（2けたのひき算）、英単語のワーク、理科の教科書）"
+      },
       summary: {
         type: Type.STRING,
-        description: "画像の内容の詳しい日本語要約。学習テーマ、書かれている数値・語句・図表の内容を、画像を見なくても再現できるくらい具体的に書く"
+        description: "その教材で学習している中身（漢字と読み・計算問題の式・語句・事実・数値など）の書き出し。問題番号・ページ番号・レイアウトは書かない"
       },
     },
-    required: ["summary"],
+    required: ["materialType", "summary"],
+    propertyOrdering: ["materialType", "summary"],
   },
 };
 
 const buildAnalysisPrompt = (count: number) =>
-  `${count}枚の画像それぞれについて、内容を日本語で詳しく要約してください。
-書かれている文字・数値・図表・写真の内容をできるだけ正確に書き出し、学習テーマ（単元名など）も明記してください。
-図・グラフ・表・絵は「何が・いくつ・どこに・どんな形や色で」描かれているかを言葉で説明してください。
-画像が横向き・逆さまに回転している場合は、正しい向きに直したつもりで読み取ってください（縦書きの文字は右の行から上→下に読む）。要約には回転していたことは書かず、正しい向きで見た内容だけを書いてください。
-後でこの要約だけを使ってクイズを作るので、画像を見なくても再現できるくらい具体的に書いてください。
+  `${count}枚の画像それぞれについて、何の教材かを見きわめ、その教材で学習している中身を日本語で書き出してください。
+後でこの書き出しだけを使って「教材の中身についての問題」（漢字ドリルなら漢字の問題、計算ドリルなら計算問題）を作ります。
+
+■ materialType: 教材の種類と学年の目安（例: 小3の漢字ドリル、小2の計算ドリル、英単語のワーク、理科の教科書、地図、図鑑、絵本）。
+■ summary: 学習テーマ（単元名）を最初に書き、続けて学習内容をひとつ残らず具体的に書き出す。教材の種類に応じて次のように書く。
+  - 漢字ドリル・ことば: 出てくる漢字・言葉ごとに、読み（音読み・訓読み）、送りがな、例の言葉や例文、意味。
+  - 計算ドリル・算数: 載っている計算問題の式をすべて書く（答えが分かれば答えも）。文章題は文章と数値をそのまま書く。
+  - 英語: 単語・表現とその意味。
+  - 理科・社会・説明文・図鑑: 大事な語句・事実・数値・しくみ。
+  - 図・グラフ・表・絵: 何が・いくつ・どんな値か・どんな形や色かを言葉で説明する。
+■ 書かないもの: 問題番号（①、問3 など）、ページ番号、「左上に」「2段目に」などの紙面の位置、枠・記入欄・マークなど、学習内容と関係のない紙面の情報。
+画像が横向き・逆さまに回転している場合は、正しい向きに直したつもりで読み取ってください（縦書きの文字は右の行から上→下に読む）。回転していたことは書かず、正しい向きで見た内容だけを書いてください。
 画像の送信順に、JSON配列で1画像1要素として返してください（配列の要素数は必ず${count}個）。`;
 
 // ゲームは常に TOTAL_QUESTIONS 問ある前提で進むため、足りない・形が壊れた応答は
@@ -451,8 +464,12 @@ async function generateQuizTwoPhase(
     }
     uncached.forEach((fileIndex, pos) => {
       const summary = data[pos]?.summary;
+      const materialType = data[pos]?.materialType;
       if (typeof summary === 'string' && summary.trim()) {
-        setCachedAnalysis(files[fileIndex], summary.trim());
+        const typeLine = typeof materialType === 'string' && materialType.trim()
+          ? `教材の種類: ${materialType.trim()}\n`
+          : '';
+        setCachedAnalysis(files[fileIndex], `${typeLine}${summary.trim()}`);
       }
     });
     if (uncached.some(i => !getCachedAnalysis(files[i]))) {
@@ -465,7 +482,8 @@ async function generateQuizTwoPhase(
 
   onProgress("AIがワクワクする問題を作成中...");
   const analysisBlock = attemptIndices
-    .map((fileIndex, pos) => `[画像${pos}]\n${getCachedAnalysis(files[fileIndex])}`)
+    // 見出しを「画像N」にすると「画像の何番？」型の問題を誘発するため「元ネタN」にする
+    .map((fileIndex, pos) => `[元ネタ${pos}]\n${getCachedAnalysis(files[fileIndex])}`)
     .join('\n\n');
   // 解析結果は「元ネタ」。指示の後ろに置き、指示より先に読ませて丸写しを誘発しないようにする
   const contents = `${prompt}\n\n===== 画像の解析結果（元ネタ） =====\n${analysisBlock}\n===== ここまで =====\n\n上の指示に従って${TOTAL_QUESTIONS}問を作成してください。`;
@@ -525,6 +543,7 @@ ${styleLines}
   3. question 以降: quizStyle と hook を反映した問題を作る。
 
 ■ 面白くするコツ
+  - 題材は教材で学んでいる中身（漢字ドリルなら漢字・言葉、計算ドリルなら数や計算、理科なら生き物やしくみ）から選ぶ。問題番号やページなど紙面の作りは題材にしない。
   - 画像は「きっかけ」。画像に書かれている語句や答えをそのまま当てさせる問題は禁止。画像の題材から一歩・二歩ジャンプした話題にしてよい。
   - 画像が複数あるときは、なるべく多くの画像から題材を選び、同じ画像・同じ話題が続かないようにする。
   - 問題文の書き出しや言い回しを毎回変える（「〜は何？」「〜はどれ？」ばかりにしない）。
@@ -582,8 +601,16 @@ ${styleLines}
 ${modeInstructions}
 
 共通ルール：
+0. 【教材の中身を問う】: まず画像（解析結果）が何の教材かを見きわめ、その教材で学習している中身そのものを題材にする。
+   - 漢字ドリル・ことば → 載っている漢字・言葉の読み・書き・送りがな・意味・熟語・使い方・画数・部首
+   - 計算ドリル・算数 → 載っている計算問題（またはそれをもとにした計算）を解かせる
+   - 英語 → 単語・表現の意味や使い方
+   - 理科・社会・説明文・図鑑 → 書かれている知識・事実・しくみ
+   - 禁止: 紙面の作りについての問題。問題番号・ページ・「何番」「何問目」「どこに書いてある」「いくつ問題がある」「どんな教材か」などを問わない。
+     悪い例:「画像の3番は何ですか？」「『海』はドリルの何番に出てくる？」「このドリルには計算問題がいくつある？」
+     良い例:「『海』の読み方はどれ？」「36 − 19 はいくつ？」
 1. 【画像参照の禁止】: 遊ぶ子供は元の画像を見られません。問題文と選択肢だけで答えられる、独立したクイズにしてください。
-   - 「画像の」「この図で」「写真の」「上の表」「左の絵」「〇ページの」「問3の」など、元の画像や紙面の場所を指す言葉は使わない。
+   - 「画像の」「この図で」「写真の」「上の表」「左の絵」「〇ページの」「問3の」「〇番の」など、元の画像や紙面の場所・番号を指す言葉は使わない。
    - 答えるのに必要な数値・語句・条件・図表の内容は、画像の内容を読み取ったうえで問題文の中に言葉で書き込む。
      悪い例:「グラフで一番多い果物はどれ？」
      良い例:「好きな果物を調べたら、りんご12人・みかん8人・ぶどう5人でした。一番人気の果物はどれ？」
