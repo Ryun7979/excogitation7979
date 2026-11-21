@@ -33,7 +33,8 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
   return (
     <div className="h-full pop-bg safe-area">
       <div className="thin-scrollbar h-full overflow-y-auto">
-        <div className="mx-auto grid max-w-6xl gap-fl-4 p-fl-4 md:grid-cols-[minmax(320px,2fr)_3fr] short:grid-cols-[minmax(300px,2fr)_3fr]">
+        {/* ふりかえりの一覧は長くなるので、その枠の中だけでスクロールさせ、点数とボタンは1画面に収める */}
+        <div className="mx-auto grid h-full max-w-6xl grid-rows-[auto_minmax(10rem,1fr)] gap-fl-4 p-fl-4 md:grid-cols-[minmax(320px,2fr)_3fr] md:grid-rows-[minmax(0,1fr)] short:grid-cols-[minmax(300px,2fr)_3fr] short:grid-rows-[minmax(0,1fr)]">
           <section className="flex flex-col gap-fl-3" aria-labelledby="score-title">
             <h1 id="score-title" className="text-fl-2xl font-black text-white">
               {isReview ? 'ふくしゅうのけっか' : 'けっか'}
@@ -64,9 +65,9 @@ export const SummaryScreen: React.FC<SummaryScreenProps> = ({
             </div>
           </section>
 
-          <section aria-labelledby="list-title" className="rounded-card bg-white p-fl-3 shadow-xl">
+          <section aria-labelledby="list-title" className="flex min-h-0 flex-col rounded-card bg-white p-fl-3 shadow-xl">
             <h2 id="list-title" className="mb-fl-2 text-fl-lg font-black text-ink">ふりかえり</h2>
-            <ol className="flex flex-col divide-y divide-slate-100">
+            <ol data-fit-scroll className="thin-scrollbar flex min-h-0 flex-1 flex-col divide-y divide-slate-100 overflow-y-auto">
               {results.map((r, i) => {
                 const q = questions[r.questionIndex];
                 if (!q) return null;

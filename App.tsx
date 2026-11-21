@@ -7,6 +7,7 @@ import { shuffleOptions } from './services/quizValidation';
 import { buildRecord, clearHistory, loadHistory, saveRecord, PlayRecord, WrongItem } from './services/history';
 import { Modal } from './components/Modal';
 import { ApiStatus } from './components/ApiStatus';
+import { FitScreen } from './components/FitScreen';
 import { TitleScreen } from './screens/TitleScreen';
 import { GeneratingScreen } from './screens/GeneratingScreen';
 import { PlayingScreen } from './screens/PlayingScreen';
@@ -328,72 +329,82 @@ const App: React.FC = () => {
       />
 
       {gameState.stage === AppStage.TITLE && (
-        <TitleScreen
-          mode={gameState.mode}
-          teacher={gameState.teacher}
-          imageCount={gameState.images.length}
-          imageUrls={imageUrls}
-          maxImages={MAX_IMAGES}
-          historyCount={history.length}
-          fastRetryEnabled={fastRetryEnabled}
-          onModeChange={mode => setGameState(prev => ({ ...prev, mode }))}
-          onTeacherChange={teacher => setGameState(prev => ({ ...prev, teacher }))}
-          onImagesSelected={handleImagesSelected}
-          onStart={startGeneration}
-          onOpenHistory={() => setGameState(prev => ({ ...prev, stage: AppStage.HISTORY }))}
-          onToggleFastRetry={toggleFastRetry}
-        />
+        <FitScreen>
+          <TitleScreen
+            mode={gameState.mode}
+            teacher={gameState.teacher}
+            imageCount={gameState.images.length}
+            imageUrls={imageUrls}
+            maxImages={MAX_IMAGES}
+            historyCount={history.length}
+            fastRetryEnabled={fastRetryEnabled}
+            onModeChange={mode => setGameState(prev => ({ ...prev, mode }))}
+            onTeacherChange={teacher => setGameState(prev => ({ ...prev, teacher }))}
+            onImagesSelected={handleImagesSelected}
+            onStart={startGeneration}
+            onOpenHistory={() => setGameState(prev => ({ ...prev, stage: AppStage.HISTORY }))}
+            onToggleFastRetry={toggleFastRetry}
+          />
+        </FitScreen>
       )}
 
       {gameState.stage === AppStage.GENERATING && (
-        <GeneratingScreen message={gameState.loadingMessage} imageCount={gameState.images.length} />
+        <FitScreen>
+          <GeneratingScreen message={gameState.loadingMessage} imageCount={gameState.images.length} />
+        </FitScreen>
       )}
 
       {gameState.stage === AppStage.PLAYING && currentQuestion && (
-        <PlayingScreen
-          question={currentQuestion}
-          index={gameState.currentQuestionIndex}
-          total={gameState.questions.length}
-          results={gameState.results}
-          selectedAnswer={selectedAnswer}
-          isReview={!!gameState.isReview}
-          isQuitConfirmOpen={isQuitConfirmOpen}
-          onAnswer={handleAnswer}
-          onJump={jumpToQuestion}
-          onQuit={() => setIsQuitConfirmOpen(true)}
-          onConfirmQuit={backToTitle}
-          onCancelQuit={() => setIsQuitConfirmOpen(false)}
-        />
+        <FitScreen>
+          <PlayingScreen
+            question={currentQuestion}
+            index={gameState.currentQuestionIndex}
+            total={gameState.questions.length}
+            results={gameState.results}
+            selectedAnswer={selectedAnswer}
+            isReview={!!gameState.isReview}
+            isQuitConfirmOpen={isQuitConfirmOpen}
+            onAnswer={handleAnswer}
+            onJump={jumpToQuestion}
+            onQuit={() => setIsQuitConfirmOpen(true)}
+            onConfirmQuit={backToTitle}
+            onCancelQuit={() => setIsQuitConfirmOpen(false)}
+          />
+        </FitScreen>
       )}
 
       {gameState.stage === AppStage.FEEDBACK && currentQuestion && lastResult && (
-        <FeedbackScreen
-          question={currentQuestion}
-          isCorrect={lastResult.isCorrect}
-          chosenIndex={lastResult.chosenIndex}
-          isLast={gameState.currentQuestionIndex + 1 >= gameState.questions.length}
-          onNext={nextQuestion}
-          onShowDetail={handleShowDetailedExplanation}
-          detail={{
-            open: isDetailedModalOpen,
-            loading: isGeneratingDetailed,
-            text: activeDetailedExplanation,
-            onClose: () => setIsDetailedModalOpen(false),
-          }}
-        />
+        <FitScreen>
+          <FeedbackScreen
+            question={currentQuestion}
+            isCorrect={lastResult.isCorrect}
+            chosenIndex={lastResult.chosenIndex}
+            isLast={gameState.currentQuestionIndex + 1 >= gameState.questions.length}
+            onNext={nextQuestion}
+            onShowDetail={handleShowDetailedExplanation}
+            detail={{
+              open: isDetailedModalOpen,
+              loading: isGeneratingDetailed,
+              text: activeDetailedExplanation,
+              onClose: () => setIsDetailedModalOpen(false),
+            }}
+          />
+        </FitScreen>
       )}
 
       {gameState.stage === AppStage.SUMMARY && (
-        <SummaryScreen
-          questions={gameState.questions}
-          results={gameState.results}
-          advice={gameState.advice}
-          isReview={!!gameState.isReview}
-          canPlayAgain={gameState.images.length > 0}
-          onRetryWrong={retryWrongFromSummary}
-          onPlayAgain={startGeneration}
-          onFinish={backToTitle}
-        />
+        <FitScreen>
+          <SummaryScreen
+            questions={gameState.questions}
+            results={gameState.results}
+            advice={gameState.advice}
+            isReview={!!gameState.isReview}
+            canPlayAgain={gameState.images.length > 0}
+            onRetryWrong={retryWrongFromSummary}
+            onPlayAgain={startGeneration}
+            onFinish={backToTitle}
+          />
+        </FitScreen>
       )}
 
       {gameState.stage === AppStage.HISTORY && (

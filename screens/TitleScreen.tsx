@@ -145,7 +145,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               </label>
             ) : (
               <div className="flex flex-1 flex-col gap-fl-2 rounded-card bg-white p-fl-2 text-ink">
-                <ul className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-4 lg:grid-cols-6" aria-label="えらんだ写真">
+                {/* マスの大きさに上限をつけ、広い画面では列をふやす（縦に伸びて1画面に入らなくなるのを防ぐ） */}
+                <ul className="grid grid-cols-[repeat(auto-fill,minmax(clamp(3.5rem,11vmin,6.5rem),1fr))] gap-2" aria-label="えらんだ写真">
                   {imageUrls.slice(0, PREVIEW_COUNT).map((url, i) => (
                     <li key={url} className="aspect-square overflow-hidden rounded-lg bg-surface-muted">
                       <img src={url} className="h-full w-full object-cover" alt={`写真${i + 1}`} />
