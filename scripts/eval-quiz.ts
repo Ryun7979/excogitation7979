@@ -3,6 +3,7 @@
 //   npm run eval                       … eval/images/ の画像で、すべてのモード×モデルを評価
 //   npm run eval -- --modes=quiz --models=gemini-3.5-flash-lite
 //   npm run eval -- --judge=gemini-3.5-flash --repeat=2
+//   npm run eval -- --checker=gemini-2.5-flash   … 答え合わせ（解き直し）のモデル。--checker=none で答え合わせをしない
 //
 // 流れ: 画像 → 学習内容の書き出し（アプリの高速リトライONと同じ2フェーズ） → 12問作る
 //       → アプリと同じ検証（quizValidation）で捨てた数を数える → 残った問題を別のAIが観点ごとに採点
@@ -14,7 +15,8 @@ import { join, extname } from 'node:path';
 import { GameMode, TeacherType, TOTAL_QUESTIONS } from '../types';
 import { FALLBACK_MODELS, Type } from '../services/aiModels';
 import { GENERATION_COUNT, analysisSchema, buildAnalysisPrompt, buildQuizPrompt, buildQuizSchema } from '../services/quizPrompts';
-import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer, violatesCondition, questionKind } from '../services/quizValidation';
+import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer, violatesCondition, hasLookalikeOption, questionKind, pickVaried } from '../services/quizValidation';
+import { answerCheckSchema, buildAnswerCheckPrompt, parseAnswerVerdicts, answerCheckProblem } from '../services/answerCheck';
 
 // ---------- 設定 ----------
 const args = Object.fromEntries(process.argv.slice(2).map(a => {
@@ -33,6 +35,8 @@ const modeKeys = (args.modes ? String(args.modes).split(',') : Object.keys(MODES
 const models = args.models ? String(args.models).split(',') : FALLBACK_MODELS.filter(m => m !== 'gemini-2.5-flash-lite');
 const judgeModel = String(args.judge ?? 'gemini-3.5-flash');
 const repeat = Math.max(1, Number(args.repeat ?? 1));
+// アプリの答え合わせ（geminiService の CHECK_MODELS の先頭）と同じモデル
+const checkerModel = String(args.checker ?? 'gemini-3.5-flash-lite');
 const imageDir = String(args.images ?? 'eval/images');
 const outDir = 'eval/results';
 
@@ -140,17 +144,22 @@ interface RunResult {
   round: number;
   batch: number;
   ms: number;
+  /** 答え合わせにかかった秒数（ミリ秒） */
+  checkMs: number;
   generated: number;
   dropped: Record<string, number>;
   kept: number;
-  judged: { question: string; options: string[]; correct: string; kind: string; checks: Record<CheckKey, boolean>; comment: string }[];
+  /** 答え合わせの前の問題（予備を含む）すべてを採点する。final は答え合わせのあとで出題に選ばれた10問 */
+  judged: { question: string; options: string[]; correct: string; kind: string; checks: Record<CheckKey, boolean>; comment: string; checkProblem: string | null; checkNote: string; final: boolean }[];
+  /** 答え合わせができたか（失敗したときはアプリと同じく、確かめずに出題する） */
+  checked: boolean;
   /** コードの検証で捨てた問題（形が壊れたものは除く）。どの問題がなぜ捨てられたかを見るため */
   droppedQuestions: { reason: string; question: string; options: string[]; correct: string }[];
   error?: string;
 }
 
 const countDrops = (raw: any[]) => {
-  const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, conditionMismatch: 0, duplicateOrExtra: 0 };
+  const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, conditionMismatch: 0, lookalike: 0, duplicateOrExtra: 0 };
   const droppedQuestions: RunResult['droppedQuestions'] = [];
   const reconciled = raw.map(reconcileAnswer);
   for (const q of reconciled) {
@@ -160,13 +169,14 @@ const countDrops = (raw: any[]) => {
     else if (copiesOriginal(q)) reason = 'copied';
     else if (revealsAnswer(q)) reason = 'revealsAnswer';
     else if (violatesCondition(q)) reason = 'conditionMismatch';
+    else if (hasLookalikeOption(q)) reason = 'lookalike';
     if (reason) {
       drops[reason]++;
       droppedQuestions.push({ reason, question: q.question, options: q.options, correct: q.options[q.correctAnswerIndex] });
     }
   }
   const kept = sanitizeQuestions(raw, GENERATION_COUNT).length;
-  drops.duplicateOrExtra = raw.length - kept - drops.notPlayable - drops.materialRef - drops.copied - drops.revealsAnswer - drops.conditionMismatch;
+  drops.duplicateOrExtra = raw.length - kept - drops.notPlayable - drops.materialRef - drops.copied - drops.revealsAnswer - drops.conditionMismatch - drops.lookalike;
   return { drops, kept, droppedQuestions };
 };
 
@@ -200,15 +210,37 @@ for (let round = 1; round <= repeat; round++) {
           });
           const raw = JSON.parse(res.text || '[]');
           const { drops, kept, droppedQuestions } = countDrops(Array.isArray(raw) ? raw : []);
-          const playable = sanitizeQuestions(raw, TOTAL_QUESTIONS);
-          const verdicts = await judge(playable, material, modeKey);
+          const candidates = sanitizeQuestions(raw, GENERATION_COUNT);
+          // アプリと同じ答え合わせ。失敗したら確かめずに出題する（アプリと同じ）
+          let checkVerdicts: ReturnType<typeof parseAnswerVerdicts> = null;
+          let checkMs = 0;
+          if (checkerModel !== 'none' && candidates.length >= TOTAL_QUESTIONS) {
+            try {
+              const { res: cres, ms: cms } = await generate({
+                model: checkerModel,
+                contents: buildAnswerCheckPrompt(candidates, material),
+                config: { responseMimeType: 'application/json', responseSchema: answerCheckSchema as any, ...thinkingFor(checkerModel) },
+              });
+              checkVerdicts = parseAnswerVerdicts(JSON.parse(cres.text || '[]'));
+              checkMs = cms;
+            } catch (e) {
+              process.stdout.write(`（答え合わせ失敗: ${(e as Error).message.slice(0, 80)}） `);
+            }
+          }
+          const problems = candidates.map((q, i) => (checkVerdicts ? answerCheckProblem(q, checkVerdicts.find(v => v.index === i)) : null));
+          const finalSet = new Set(pickVaried(candidates.filter((_, i) => !problems[i]), TOTAL_QUESTIONS));
+          const verdicts = await judge(candidates, material, modeKey);
           results.push({
-            modeKey, model, round, batch: b, ms,
+            modeKey, model, round, batch: b, ms, checkMs,
             generated: Array.isArray(raw) ? raw.length : 0,
-            dropped: drops, kept, droppedQuestions,
-            judged: playable.map((q, i) => {
+            dropped: drops, kept: candidates.filter((_, i) => !problems[i]).length, droppedQuestions,
+            checked: checkVerdicts !== null,
+            judged: candidates.map((q, i) => {
               const v = verdicts.find(x => x.index === i);
               return {
+                checkProblem: problems[i],
+                checkNote: checkVerdicts?.find(x => x.index === i)?.check ?? '',
+                final: finalSet.has(q),
                 question: q.question,
                 options: q.options,
                 correct: q.options[q.correctAnswerIndex],
@@ -218,10 +250,10 @@ for (let round = 1; round <= repeat; round++) {
               };
             }),
           });
-          console.log(`${(ms / 1000).toFixed(1)}秒 / 使える問題 ${kept}/${GENERATION_COUNT}`);
+          console.log(`${(ms / 1000).toFixed(1)}秒＋答え合わせ${(checkMs / 1000).toFixed(1)}秒 / コードの検証後 ${kept}/${GENERATION_COUNT} / 答え合わせ後 ${problems.filter(p => !p).length}${checkVerdicts ? '' : '（答え合わせなし）'}`);
         } catch (e) {
           console.log(`失敗: ${(e as Error).message}`);
-          results.push({ modeKey, model, round, batch: b, ms: 0, generated: 0, dropped: {}, kept: 0, judged: [], droppedQuestions: [], error: String((e as Error).message) });
+          results.push({ modeKey, model, round, batch: b, ms: 0, checkMs: 0, generated: 0, dropped: {}, kept: 0, judged: [], droppedQuestions: [], checked: false, error: String((e as Error).message) });
         }
       }
     }
@@ -248,31 +280,46 @@ const topKindShare = (judged: { kind: string }[]) => {
   const n = Math.max(0, ...Object.entries(kindCounts(judged)).filter(([k]) => k !== 'その他').map(([, v]) => v));
   return judged.length ? n / judged.length : 0;
 };
-const header = ['モデル', 'モード', '平均秒', '使える問題/12', ...checkKeys, 'すべて合格', '同じ型の最大割合'];
+// 答え合わせの効き目: 採点AIが答えまわり（answerCorrect・uniqueAnswer・noTypos）で不合格とした問題を、答え合わせで捨てられたか
+const ANSWER_KEYS: CheckKey[] = ['answerCorrect', 'uniqueAnswer', 'noTypos'];
+const answerBad = (j: { checks: Record<CheckKey, boolean> }) => ANSWER_KEYS.some(k => !j.checks[k]);
+const header = ['モデル', 'モード', '平均秒（作問＋答え合わせ）', '答え合わせ後の問題/12', ...checkKeys, 'すべて合格（出題10問）', 'すべて合格（答え合わせ前の全問）', '答えの誤り→捨てた', '正しい問題→捨てた', '同じ型の最大割合'];
 const rows = [...groups.entries()].map(([key, rs]) => {
   const [model, modeKey] = key.split('|');
-  const judged = rs.flatMap(r => r.judged);
+  const all = rs.flatMap(r => r.judged);
+  const judged = all.filter(j => j.final);
   const ok = rs.filter(r => !r.error);
+  const checkedAll = rs.filter(r => r.checked).flatMap(r => r.judged);
+  const bad = checkedAll.filter(answerBad);
+  const good = checkedAll.filter(j => !answerBad(j));
   return [
     model,
     modeKey,
-    ok.length ? (ok.reduce((s, r) => s + r.ms, 0) / ok.length / 1000).toFixed(1) : '-',
+    ok.length ? `${(ok.reduce((s, r) => s + r.ms, 0) / ok.length / 1000).toFixed(1)}＋${(ok.reduce((s, r) => s + r.checkMs, 0) / ok.length / 1000).toFixed(1)}` : '-',
     ok.length ? (ok.reduce((s, r) => s + r.kept, 0) / ok.length).toFixed(1) : '-',
     ...checkKeys.map(k => pct(judged.filter(j => j.checks[k]).length, judged.length)),
     pct(judged.filter(j => checkKeys.every(k => j.checks[k])).length, judged.length),
-    (() => { const withQ = ok.filter(r => r.judged.length > 0); return withQ.length ? `${Math.round((withQ.reduce((s, r) => s + topKindShare(r.judged), 0) / withQ.length) * 100)}%` : '-'; })(),
+    pct(all.filter(j => checkKeys.every(k => j.checks[k])).length, all.length),
+    `${bad.filter(j => j.checkProblem).length}/${bad.length}`,
+    `${good.filter(j => j.checkProblem).length}/${good.length}`,
+    (() => { const withQ = ok.filter(r => r.judged.some(j => j.final)); return withQ.length ? `${Math.round((withQ.reduce((s, r) => s + topKindShare(r.judged.filter(j => j.final)), 0) / withQ.length) * 100)}%` : '-'; })(),
   ];
 });
 
 const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
 const failures = results.flatMap(r => r.judged
   .filter(j => !checkKeys.every(k => j.checks[k]))
-  .map(j => `- **${r.model} / ${r.modeKey}**: ${j.question}（正解: ${j.correct}）\n  - ${checkKeys.filter(k => !j.checks[k]).join(', ')}: ${j.comment}`));
+  .map(j => `- **${r.model} / ${r.modeKey}**${j.checkProblem ? ` 〔答え合わせで捨てた: ${j.checkProblem}〕` : j.final ? '' : '（予備・出題せず）'}: ${j.question}（正解: ${j.correct} / 選択肢: ${j.options.join('・')}）\n  - ${checkKeys.filter(k => !j.checks[k]).join(', ')}: ${j.comment}`));
+// 採点では合格なのに答え合わせで捨てた問題（捨てすぎの確認用）
+const overDropped = results.flatMap(r => r.judged
+  .filter(j => j.checkProblem && !answerBad(j))
+  .map(j => `- **${r.model} / ${r.modeKey}** [${j.checkProblem}]: ${j.question}（正解: ${j.correct} / 選択肢: ${j.options.join('・')}）\n  - 答え合わせ: ${j.checkNote}`));
 
 const md = `# 問題の質の評価 ${stamp}
 
 - 画像: ${imageFiles.length}枚（${imageDir}）
 - 採点モデル: ${judgeModel}
+- 答え合わせのモデル: ${checkerModel}
 - 回数: ${repeat}
 
 ## 集計
@@ -299,7 +346,11 @@ ${[...groups.entries()].map(([key, rs]) => `- ${key.replace('|', ' / ')}: ${Obje
 
 ${results.flatMap(r => r.droppedQuestions.map(d => `- **${r.model} / ${r.modeKey}** [${d.reason}]: ${d.question}（正解: ${d.correct}）`)).join('\n') || 'なし'}
 
-## 不合格だった問題
+## 採点では合格なのに答え合わせで捨てた問題
+
+${overDropped.join('\n') || 'なし'}
+
+## 不合格だった問題（答え合わせ前の予備も含む）
 
 ${failures.join('\n') || 'なし'}
 
@@ -307,5 +358,5 @@ ${results.some(r => r.error) ? `## 失敗した実行\n\n${results.filter(r => r
 
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, `${stamp}.md`), md);
-writeFileSync(join(outDir, `${stamp}.json`), JSON.stringify({ stamp, judgeModel, images: imageFiles, results }, null, 2));
+writeFileSync(join(outDir, `${stamp}.json`), JSON.stringify({ stamp, judgeModel, checkerModel, images: imageFiles, results }, null, 2));
 console.log(`\n結果: ${join(outDir, `${stamp}.md`)}`);

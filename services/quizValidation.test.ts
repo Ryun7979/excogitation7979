@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd, hasLookalikeOption } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -267,4 +267,18 @@ test('sanitizeQuestions: 問題文と解説の文末の「.」を直す', () => 
   const [q] = sanitizeQuestions([{ ...valid(1), question: '日本一高い山はどれか.', explanation: '富士山です.' }], 10);
   assert.equal(q.question, '日本一高い山はどれか。');
   assert.equal(q.explanation, '富士山です。');
+});
+
+test('hasLookalikeOption: 正解と濁点・小さい字だけちがう不正解があれば見つける', () => {
+  const q = (question: string, options: string[], correctAnswerIndex = 0) => ({ ...valid(1), question, options, correctAnswerIndex });
+  assert.equal(hasLookalikeOption(q('ヨウ素液をつけると青むらさき色になるものは？', ['でんぷん', 'てんぷん', 'しお', 'さとう'])), true);
+  assert.equal(hasLookalikeOption(q('植物が日光で作る養分は？', ['デンプン', 'てんぷん', 'しお', 'さとう'])), true);
+  assert.equal(hasLookalikeOption(q('次のうち、こん虫はどれ？', ['バッタ', 'ハッタ', 'クモ', 'ダンゴムシ'])), true);
+  // ふつうの選択肢は見のがす
+  assert.equal(hasLookalikeOption(q('ヨウ素液をつけると青むらさき色になるものは？', ['でんぷん', 'しお', 'さとう', 'あぶら'])), false);
+  // 読みや表記を問う問題の1字ちがいは、正しい引っかけなので見ない
+  assert.equal(hasLookalikeOption(q('『発表』の読み方はどれ？', ['はっぴょう', 'はっひょう', 'はつひょう', 'はっぴょ'])), false);
+  assert.equal(hasLookalikeOption(q('かなづかいが正しいのはどれ？', ['こおり', 'こうり', 'こほり', 'こをり'])), false);
+  // コードの検証（sanitizeQuestions）で捨てられる
+  assert.equal(sanitizeQuestions([q('ヨウ素液をつけると青むらさき色になるものは？', ['でんぷん', 'てんぷん', 'しお', 'さとう'])], 10).length, 0);
 });

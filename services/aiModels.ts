@@ -19,6 +19,7 @@ export const Type = {
   INTEGER: 'INTEGER',
   ARRAY: 'ARRAY',
   OBJECT: 'OBJECT',
+  BOOLEAN: 'BOOLEAN',
 } as const;
 
 /** SDK の ThinkingLevel 列挙と同じ値 */

@@ -212,6 +212,31 @@ export const violatesArithmetic = (q: any): boolean => {
 /** 問題文の条件（「『X』を使った」「答えが N になる」など）と正解が合わないか */
 export const violatesCondition = (q: any): boolean => violatesKanjiCondition(q) || violatesArithmetic(q);
 
+// ---------- 正解と1字ちがいのにせもの選択肢 ----------
+
+// 濁点・半濁点・小さい字・のばす音・カタカナ/ひらがなの違いをなくす
+const SMALL_KANA: Record<string, string> = { ぁ: 'あ', ぃ: 'い', ぅ: 'う', ぇ: 'え', ぉ: 'お', っ: 'つ', ゃ: 'や', ゅ: 'ゆ', ょ: 'よ', ゎ: 'わ' };
+const looseKana = (s: string): string =>
+  s.normalize('NFKC')
+    .replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
+    .normalize('NFD').replace(/[゙゚]/g, '').normalize('NFC')
+    .replace(/[ぁぃぅぇぉっゃゅょゎ]/g, c => SMALL_KANA[c])
+    .replace(/[ー\s]/g, '');
+// 読み・書き・表記を問う問題では、1字ちがいの選択肢は正しい引っかけなので見ない
+const SPELLING_QUESTION = /読|よみ|よむ|書|かき|表記|かなづかい|仮名遣|送りがな|おくりがな|ひらがな|カタカナ|かたかな|発音|つづり|スペル/;
+
+/**
+ * 不正解に、正解と濁点・小さい字だけちがう「にせもの」の言葉があるか
+ * （例: 正解「でんぷん」に対して不正解「てんぷん」）。
+ * 子どもには誤字に見え、正解も2つあるように見えるため捨てる。読みや表記を問う問題は対象外。
+ */
+export const hasLookalikeOption = (q: any): boolean => {
+  if (SPELLING_QUESTION.test(String(q.question).normalize('NFKC'))) return false;
+  const correct = looseKana(String(q.options[q.correctAnswerIndex]));
+  if (correct.length < 2) return false;
+  return q.options.some((o: string, i: number) => i !== q.correctAnswerIndex && looseKana(o) === correct);
+};
+
 // ---------- 同じ型の問題が多い（T12） ----------
 
 // 先に当てたものを優先する（「『よむ』を漢字で書くと？」は読みではなく書き）
@@ -323,6 +348,7 @@ export const sanitizeQuestions = (
     .filter(q => !copiesOriginal(q))
     .filter(q => !revealsAnswer(q))
     .filter(q => !violatesCondition(q))
+    .filter(q => !hasLookalikeOption(q))
     .filter(q => {
       const key = duplicateKey(q);
       const qKey = questionKey(q);

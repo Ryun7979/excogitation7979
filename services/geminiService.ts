@@ -9,7 +9,8 @@ export { generateAdvice } from "./advicePool";
 import { isRetryableApiError, isSlowdownError, RetryableError, describeApiError } from "./retryPolicy";
 import { IMAGE_BATCH_LEVELS, stepDown, stepUp, initialBatchSize } from "./batchSizer";
 import { getCachedAnalysis, setCachedAnalysis } from "./imageAnalysisCache";
-import { sanitizeQuestions, shuffleOptions } from "./quizValidation";
+import { sanitizeQuestions, shuffleOptions, pickVaried } from "./quizValidation";
+import { answerCheckSchema, buildAnswerCheckPrompt, parseAnswerVerdicts, answerCheckProblem, applyAnswerCheck } from "./answerCheck";
 
 // Gemini は中継API（/api/gemini）経由で呼ぶ。APIキーは画面側に置かない（server/geminiProxy.ts）。
 // ハングした要求はタイムアウトで切って次のフォールバックモデルに回す（aiClient.ts）。
@@ -141,10 +142,66 @@ export interface QuizGenerationResult {
 //   同じ画像は二度と解析しない。モデル切替リトライ・枚数を減らした再試行・
 //   「もういちど」再プレイのすべてでこのキャッシュが再利用される。
 // フェーズ2: テキスト要約→クイズ（軽い・画像なし）。失敗しても画像を送り直さず再試行できる。
-// ゲームは常に TOTAL_QUESTIONS 問ある前提で進むため、足りない・形が壊れた応答は
-// 再試行対象にする（そのまま使うと途中で問題が無くなり画面が落ちる）
-const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
-  const questions = sanitizeQuestions(JSON.parse(text || "[]"), TOTAL_QUESTIONS);
+
+// 答え合わせ（解き直し）に使うモデル。作問1回ごとに1回呼ぶので、無料枠の上限が大きい軽量モデルを先にする。
+// 2.5-flash-lite は作問と同じ理由（明らかなまちがいが多い）で外す
+const CHECK_MODELS: readonly string[] = ['gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+
+type Candidate = ReturnType<typeof sanitizeQuestions>[number];
+
+/**
+ * 正解を伏せた問題をAIに解き直させ、正しい選択肢が「つけた正解ちょうど1つ」でない問題を捨てる（answerCheck.ts）。
+ * 答え合わせ自体が失敗したとき（混雑・上限など）は、待ち時間を延ばさないよう、確かめずにそのまま返す
+ */
+async function checkAnswers(
+  questions: Candidate[],
+  material: string | undefined,
+  onProgress: (message: string) => void,
+): Promise<Candidate[]> {
+  onProgress("答えが正しいか たしかめています...");
+  const prompt = buildAnswerCheckPrompt(questions, material);
+  for (const modelName of CHECK_MODELS) {
+    try {
+      const response = await generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: answerCheckSchema,
+          ...buildModelConfig(modelName),
+        },
+      });
+      const verdicts = parseAnswerVerdicts(JSON.parse(response.text || "[]"));
+      if (!verdicts) throw new Error("答え合わせの応答が不正でした");
+      questions.forEach((q, i) => {
+        const v = verdicts.find(x => x.index === i);
+        const problem = answerCheckProblem(q, v);
+        if (problem) console.warn(`[答え合わせ] 捨てた (${problem}): ${q.question} / 正解: ${q.options[q.correctAnswerIndex]} / ${v?.check}`);
+      });
+      return applyAnswerCheck(questions, verdicts);
+    } catch (e) {
+      console.warn(`答え合わせに失敗 (${modelName}): ${(e as any)?.message ?? e}`);
+    }
+  }
+  console.warn("答え合わせができなかったので、確かめずに出題します");
+  return questions;
+}
+
+/**
+ * 作問の応答 → コードの検証 → 答え合わせ → TOTAL_QUESTIONS 問。
+ * ゲームは常に TOTAL_QUESTIONS 問ある前提で進むため、足りない・形が壊れた応答は
+ * 再試行対象にする（そのまま使うと途中で問題が無くなり画面が落ちる）
+ */
+async function toGameQuestions(
+  text: string | undefined,
+  material: string | undefined,
+  onProgress: (message: string) => void,
+): Promise<QuizQuestion[]> {
+  // 予備も含めて、検証を通った問題をすべて取り出す（答え合わせのあとで TOTAL_QUESTIONS 問にしぼる）
+  let candidates = sanitizeQuestions(JSON.parse(text || "[]"), GENERATION_COUNT);
+  // コードの検証の時点で足りなければ、答え合わせを待たずに作り直す
+  if (candidates.length >= TOTAL_QUESTIONS) candidates = await checkAnswers(candidates, material, onProgress);
+  const questions = pickVaried(candidates, TOTAL_QUESTIONS);
   if (questions.length < TOTAL_QUESTIONS) {
     throw new RetryableError(`AIの問題が足りませんでした（${questions.length}/${TOTAL_QUESTIONS}問）`);
   }
@@ -165,6 +222,7 @@ async function generateQuizSinglePhase(
   prompt: string,
   quizSchema: object,
   modelName: string,
+  onProgress: (message: string) => void,
 ): Promise<QuizQuestion[]> {
   const imageParts = await Promise.all(attemptIndices.map(async i => ({
     inlineData: { data: await getResizedBase64(i, IMAGE_MAX_SIZE), mimeType: "image/jpeg" }
@@ -178,7 +236,7 @@ async function generateQuizSinglePhase(
       ...buildModelConfig(modelName),
     },
   });
-  return parseQuizResponse(response.text);
+  return toGameQuestions(response.text, undefined, onProgress);
 }
 
 async function generateQuizTwoPhase(
@@ -249,7 +307,7 @@ async function generateQuizTwoPhase(
       ...buildModelConfig(modelName),
     },
   });
-  return parseQuizResponse(response.text);
+  return toGameQuestions(response.text, analysisBlock, onProgress);
 }
 
 export const generateQuizFromImages = async (
@@ -301,7 +359,7 @@ export const generateQuizFromImages = async (
 
         const questions = useFastRetry
           ? await generateQuizTwoPhase(files, attemptIndices, getResizedBase64, prompt, quizSchema, modelName, onProgress)
-          : await generateQuizSinglePhase(attemptIndices, getResizedBase64, prompt, quizSchema, modelName);
+          : await generateQuizSinglePhase(attemptIndices, getResizedBase64, prompt, quizSchema, modelName, onProgress);
 
         // 速く成功したら次回は1段戻し、遅かったら今回の枚数を維持する
         adaptiveMaxImages = (Date.now() - startedAt < FAST_RESPONSE_MS)
