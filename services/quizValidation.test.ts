@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -30,6 +30,24 @@ test('同じ選択肢が重複している問題は除外される', () => {
   // 空白や全角・半角の違いだけでも重複とみなす
   assert.equal(isPlayableQuestion({ ...valid(1), options: ['A', 'Ａ', 'C', 'D'] }), false);
   assert.equal(isPlayableQuestion({ ...valid(1), options: ['小 皿', '小皿', 'C', 'D'] }), false);
+});
+
+test('reconcileAnswer: answer と一致する選択肢に正解番号を付け直す', () => {
+  const q = { ...valid(1), options: ['69', '70', '68', '71'], correctAnswerIndex: 0, answer: '70' };
+  assert.equal(reconcileAnswer(q).correctAnswerIndex, 1);
+  // 全角・空白の違いは同じとみなす
+  assert.equal(reconcileAnswer({ ...q, answer: '７０ ' }).correctAnswerIndex, 1);
+});
+
+test('reconcileAnswer: answer がどの選択肢とも一致しなければ除外される', () => {
+  const q = { ...valid(1), options: ['69', '68', '67', '71'], answer: '70' };
+  assert.equal(reconcileAnswer(q), null);
+  assert.equal(sanitizeQuestions([q], 10).length, 0);
+});
+
+test('reconcileAnswer: answer が無ければそのまま', () => {
+  const q = valid(2);
+  assert.equal(reconcileAnswer(q), q);
 });
 
 test('正解インデックスが範囲外・非整数なら除外される', () => {

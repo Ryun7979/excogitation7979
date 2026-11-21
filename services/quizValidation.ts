@@ -55,6 +55,22 @@ export const shuffleOptions = <Q extends { options: string[]; correctAnswerIndex
 };
 
 /**
+ * AIが先に書いた正解(answer)と選択肢を照合し、correctAnswerIndex を付け直す。
+ * 軽量モデルは途中式で正しく 61+9=70 と出しても、正解番号では 69 を指すことがあるため。
+ * answer が選択肢のどれとも一致しない問題は、正解がどれか確定できないので除外する（null を返す）。
+ * answer が無い応答（古い形式など）はそのまま通す。
+ */
+export const reconcileAnswer = (q: any): any => {
+  if (q == null || typeof q !== 'object' || !isNonEmptyString(q.answer) || !Array.isArray(q.options)) {
+    return q;
+  }
+  const target = normalizeOption(q.answer);
+  const index = q.options.findIndex((o: unknown) => typeof o === 'string' && normalizeOption(o) === target);
+  if (index < 0) return null;
+  return { ...q, correctAnswerIndex: index };
+};
+
+/**
  * 出題可能な問題だけを先頭から最大 total 問まで返す。
  * 解説が欠けていても出題はできるので空文字で補う。
  */
@@ -64,6 +80,7 @@ export const sanitizeQuestions = (
 ): Omit<QuizQuestion, 'id'>[] => {
   if (!Array.isArray(data)) return [];
   return data
+    .map(reconcileAnswer)
     .filter(isPlayableQuestion)
     .slice(0, total)
     .map((q: any) => ({

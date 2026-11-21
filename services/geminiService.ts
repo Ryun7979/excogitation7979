@@ -260,7 +260,14 @@ const baseQuestionProperties = {
   targetAge: { type: Type.STRING, description: "推定対象学年" },
   sourceImageIndex: { type: Type.INTEGER, description: "この問題の元になった元ネタ（画像）の番号（送信順の0始まり）。この番号は記録用で、問題文には出さない" },
 };
-const baseQuestionKeys = ["question", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
+// 選択肢より先に「途中式・根拠」と「正解」を書かせる。軽量モデルは選択肢を並べてから
+// 正解番号を選ぶと 61+9 の正解を 69 にするなどの取り違えをするため。
+// answer はコード側で選択肢と照合し、correctAnswerIndex を付け直す（quizValidation.reconcileAnswer）
+const answerFirstProperties = {
+  solution: { type: Type.STRING, description: "正解を出すための途中式・根拠（計算なら式と答え、知識なら教材に書いてある事実）を短く" },
+  answer: { type: Type.STRING, description: "正解。このあと options に、この文字列と一字一句同じ選択肢を必ず1つ入れる" },
+};
+const baseQuestionKeys = ["question", "solution", "answer", "options", "correctAnswerIndex", "explanation", "targetAge", "sourceImageIndex"];
 
 // あまの先生用: 問題文より先に「元ネタ」と「どう変えたか」を書かせる。
 // 軽量モデル＋思考最小だと、先に書き出させないと元の問題をそのまま写しがちなため。
@@ -292,7 +299,7 @@ const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
     maxItems: String(TOTAL_QUESTIONS),
     items: {
       type: Type.OBJECT,
-      properties: { ...planning, ...baseQuestionProperties },
+      properties: { ...planning, ...baseQuestionProperties, ...answerFirstProperties },
       required: keys,
       propertyOrdering: keys,
     },
@@ -404,7 +411,7 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
   const now = Date.now();
   return questions.map((q, i) => {
     // 作問メモ（あまの先生の originalContent 等、クイズモードの quizStyle 等）はゲームには不要なので取り除く
-    const { originalContent, learningTheme, twist, quizStyle, hook, basis, ...rest } = q as any;
+    const { originalContent, learningTheme, twist, quizStyle, hook, basis, solution, answer, ...rest } = q as any;
     if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
     if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook} / 根拠: ${basis}`);
     // AIは正解を前の方に置きがちなので、選択肢の並びをシャッフルする
@@ -630,6 +637,9 @@ ${modeInstructions}
 0b. 【正解はかならず1つ】: 不正解の3つは、はっきりまちがいと言えるものにする。
    - 「〜を使った熟語はどれ？」なら、不正解は実在しない言葉や、その漢字を使っていない言葉にする（4つとも正しい熟語、は禁止）。
    - 同じ選択肢を2回以上使わない。4つはすべて別の答えにする。
+   - 正解の言いかえ・同じものの別名を不正解に入れない（例: 正解「アルミニウムはく」に対して不正解「アルミホイル」は禁止）。
+   - 計算問題は solution に式と答えを書いて計算を確かめ、その答えを answer にする。
+   - 人物・年・できごとの組み合わせは教材に書いてあるとおりにする（例: 教材に「2代将軍の徳川秀忠は武家諸法度を定めた」とあれば、家康に変えない）。
 1. 【画像参照の禁止】: 遊ぶ子供は元の画像を見られません。問題文と選択肢だけで答えられる、独立したクイズにしてください。
    - 「画像の」「この図で」「写真の」「上の表」「左の絵」「〇ページの」「問3の」「〇番の」など、元の画像や紙面の場所・番号を指す言葉は使わない。
    - 答えるのに必要な数値・語句・条件・図表の内容は、画像の内容を読み取ったうえで問題文の中に言葉で書き込む。
@@ -638,6 +648,7 @@ ${modeInstructions}
    - 図や絵を見ないと解けない問題（形・位置・色を見て答える問題など）は、言葉で説明して解ける形に直すか、別の題材に変える。
    - 画像が横向き・逆さまに回転している場合は、正しい向きに直したつもりで文字や図を読み取る。
 2. 【言語】: 子供向けの楽しい日本語を使用。
+   - 語句（地名・人名・用語・できごと）は教材の表記のまま漢字で書く。ひらがなに書き直さない（例: 「北海道」を「ほっかいどう」、「三内丸山遺跡」を「さんないまるやまいせき」にしない）。読みを添えたいときは「三内丸山（さんないまるやま）遺跡」のように4つの選択肢すべてに同じ形で付ける。
 3. 【先生スタイル】: ${teacherStyle}性格で出題。
 4. 【元画像の明示】: 各問題について、その問題の元になった画像の番号（送信順で0始まり）をsourceImageIndexとして必ず含めてください。
 5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。
