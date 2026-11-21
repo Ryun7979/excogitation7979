@@ -9,7 +9,14 @@ export const OPTION_COUNT = 4;
 const isNonEmptyString = (v: unknown): v is string =>
   typeof v === 'string' && v.trim().length > 0;
 
-/** 1問分が出題可能な形か（問題文・4つの選択肢・正解インデックス） */
+// 空白や全角/半角の違いだけの選択肢も「同じ」とみなす
+const normalizeOption = (o: string): string => o.normalize('NFKC').replace(/\s+/g, '');
+
+/** 選択肢がすべて異なるか（AIが「利益・利益・公益・利益」のように重複させることがある） */
+export const hasDistinctOptions = (options: string[]): boolean =>
+  new Set(options.map(normalizeOption)).size === options.length;
+
+/** 1問分が出題可能な形か（問題文・4つの異なる選択肢・正解インデックス） */
 export const isPlayableQuestion = (q: any): boolean =>
   q != null &&
   typeof q === 'object' &&
@@ -17,6 +24,7 @@ export const isPlayableQuestion = (q: any): boolean =>
   Array.isArray(q.options) &&
   q.options.length === OPTION_COUNT &&
   q.options.every(isNonEmptyString) &&
+  hasDistinctOptions(q.options) &&
   Number.isInteger(q.correctAnswerIndex) &&
   q.correctAnswerIndex >= 0 &&
   q.correctAnswerIndex < OPTION_COUNT;

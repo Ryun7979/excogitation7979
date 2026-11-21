@@ -25,6 +25,13 @@ test('空の選択肢や問題文は除外される', () => {
   assert.equal(isPlayableQuestion({ ...valid(1), question: '  ' }), false);
 });
 
+test('同じ選択肢が重複している問題は除外される', () => {
+  assert.equal(isPlayableQuestion({ ...valid(1), options: ['利益', '利益', '公益', '利益'] }), false);
+  // 空白や全角・半角の違いだけでも重複とみなす
+  assert.equal(isPlayableQuestion({ ...valid(1), options: ['A', 'Ａ', 'C', 'D'] }), false);
+  assert.equal(isPlayableQuestion({ ...valid(1), options: ['小 皿', '小皿', 'C', 'D'] }), false);
+});
+
 test('正解インデックスが範囲外・非整数なら除外される', () => {
   assert.equal(isPlayableQuestion({ ...valid(1), correctAnswerIndex: 4 }), false);
   assert.equal(isPlayableQuestion({ ...valid(1), correctAnswerIndex: -1 }), false);

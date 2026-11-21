@@ -137,8 +137,13 @@ const ADVICE_POOL: Record<number, string[]> = {
 
 // --- Utility: Image Resizing for Token Optimization ---
 // Geminiは縦横とも384px以下の画像を最小トークン数(258)で処理する。
-// 384を超えるとタイル分割されてトークン数が数倍になるため、384に収める
-const resizeImage = async (file: File, maxWidth = 384): Promise<string> => {
+// 384を超えるとタイル分割されてトークン数が数倍になるため、通常は384に収める
+const QUIZ_IMAGE_MAX_SIZE = 384;
+// 2フェーズ生成の画像解析だけは高解像度で送る。384だとドリルの小さな文字
+// （例文の漢字・計算式）が読めず、大きな見出しの字だけから出題されたり
+// 「枝」を「技」と読み違えたりするため。解析結果はキャッシュされるので送信は1回きり
+const ANALYSIS_IMAGE_MAX_SIZE = 1024;
+const resizeImage = async (file: File, maxWidth = QUIZ_IMAGE_MAX_SIZE): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = URL.createObjectURL(file);
@@ -431,7 +436,7 @@ async function generateQuizTwoPhase(
   ai: GoogleGenAI,
   files: File[],
   attemptIndices: number[],
-  getResizedBase64: (fileIndex: number) => Promise<string>,
+  getResizedBase64: (fileIndex: number, maxSize?: number) => Promise<string>,
   prompt: string,
   quizSchema: object,
   modelName: string,
@@ -447,7 +452,7 @@ async function generateQuizTwoPhase(
     );
     console.log(`Analyzing ${uncached.length}/${attemptIndices.length} images (rest reused from cache)`);
     const imageParts = await Promise.all(uncached.map(async i => ({
-      inlineData: { data: await getResizedBase64(i), mimeType: "image/jpeg" }
+      inlineData: { data: await getResizedBase64(i, ANALYSIS_IMAGE_MAX_SIZE), mimeType: "image/jpeg" }
     })));
     const response = await ai.models.generateContent({
       model: modelName,
@@ -514,12 +519,16 @@ export const generateQuizFromImages = async (
   console.log("Selected image indices for quiz:", drawnIndices, "fastRetry:", useFastRetry);
 
   // 画像リサイズは実際に送信が必要になった時点で行う（解析済みキャッシュがあれば不要）
-  const resizedCache = new Map<number, string>();
-  const getResizedBase64 = async (fileIndex: number): Promise<string> => {
-    let base64 = resizedCache.get(fileIndex);
+  const resizedCache = new Map<string, string>();
+  const getResizedBase64 = async (
+    fileIndex: number,
+    maxSize: number = QUIZ_IMAGE_MAX_SIZE
+  ): Promise<string> => {
+    const key = `${fileIndex}@${maxSize}`;
+    let base64 = resizedCache.get(key);
     if (!base64) {
-      base64 = await resizeImage(files[fileIndex]);
-      resizedCache.set(fileIndex, base64);
+      base64 = await resizeImage(files[fileIndex], maxSize);
+      resizedCache.set(key, base64);
     }
     return base64;
   };
@@ -609,6 +618,13 @@ ${modeInstructions}
    - 禁止: 紙面の作りについての問題。問題番号・ページ・「何番」「何問目」「どこに書いてある」「いくつ問題がある」「どんな教材か」などを問わない。
      悪い例:「画像の3番は何ですか？」「『海』はドリルの何番に出てくる？」「このドリルには計算問題がいくつある？」
      良い例:「『海』の読み方はどれ？」「36 − 19 はいくつ？」
+   - 禁止: 「教材に何が載っているか」を当てさせる問題。教材を見た人しか答えられない。答えは、教材を見ていない子でもその漢字・計算・知識を知っていれば1つに決まるようにする。
+     悪い例:「ドリルで『税』の学習として扱われているものはどれ？」「このページで練習する熟語はどれ？」
+     良い例:「『税金』の読み方はどれ？」「『こくみんのぜいきん』を漢字で書くとどれ？」
+   - 漢字の読みは、その学年の教科書で習う読み（常用漢字表にある読み）だけを使う。習わない読みや、めったに使わない読みを正解にしない。
+0b. 【正解はかならず1つ】: 不正解の3つは、はっきりまちがいと言えるものにする。
+   - 「〜を使った熟語はどれ？」なら、不正解は実在しない言葉や、その漢字を使っていない言葉にする（4つとも正しい熟語、は禁止）。
+   - 同じ選択肢を2回以上使わない。4つはすべて別の答えにする。
 1. 【画像参照の禁止】: 遊ぶ子供は元の画像を見られません。問題文と選択肢だけで答えられる、独立したクイズにしてください。
    - 「画像の」「この図で」「写真の」「上の表」「左の絵」「〇ページの」「問3の」「〇番の」など、元の画像や紙面の場所・番号を指す言葉は使わない。
    - 答えるのに必要な数値・語句・条件・図表の内容は、画像の内容を読み取ったうえで問題文の中に言葉で書き込む。
@@ -619,7 +635,9 @@ ${modeInstructions}
 2. 【言語】: 子供向けの楽しい日本語を使用。
 3. 【先生スタイル】: ${teacherStyle}性格で出題。
 4. 【元画像の明示】: 各問題について、その問題の元になった画像の番号（送信順で0始まり）をsourceImageIndexとして必ず含めてください。
-5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。`;
+5. 【選択肢の均質化】: 4つの選択肢は、文字数・文体・読み仮名（ふりがな）や補足説明の有無をすべて揃えてください。正解の選択肢にだけ読み仮名や注釈を付けたり、他より詳しく書いたりしないこと。選択肢の見た目や書き方の違いから正解が推測できてはいけません。
+   - 選択肢は答えそのものだけを書く。「〜の読み方」「〜の熟語」「〜の学習」のような、4つ全部に付く飾りの言葉は付けない。
+     悪い例: 「エキの読み方」「トクの読み方」 → 良い例: 「エキ」「トク」`;
 
   return queuedRequest(async () => {
     onProgress("画像を解析して遊び方を考えています...");
