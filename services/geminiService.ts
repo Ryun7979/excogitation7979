@@ -276,6 +276,9 @@ const amanoPlanningProperties = {
 const quizPlanningProperties = {
   quizStyle: { type: Type.STRING, description: "この問題に割り当てられた出題スタイル名（指示のとおりに書き写す）" },
   hook: { type: Type.STRING, description: "この問題の「へえ！」「なるほど！」ポイント（答えを知って驚く・笑う理由）を一言で" },
+  // 問題文より先に正解の根拠を書かせる。軽量モデル＋思考最小だと、成り立たない
+  // なぞなぞ（鳴かないカラスガイが「鳴く」）や誤った前提（「囲」の中に「韋」）を作りがちなため
+  basis: { type: Type.STRING, description: "正解が正しいと言える根拠。事実なら教科書・辞書にのっている事実を、なぞなぞなら仕掛け（どの言葉がどう掛かっているか）を具体的に書く。問題文に書く説明が正解に本当に当てはまるかも確かめる" },
 };
 
 const buildQuizSchema = (mode: GameMode, teacher: TeacherType) => {
@@ -401,9 +404,9 @@ const parseQuizResponse = (text: string | undefined): QuizQuestion[] => {
   const now = Date.now();
   return questions.map((q, i) => {
     // 作問メモ（あまの先生の originalContent 等、クイズモードの quizStyle 等）はゲームには不要なので取り除く
-    const { originalContent, learningTheme, twist, quizStyle, hook, ...rest } = q as any;
+    const { originalContent, learningTheme, twist, quizStyle, hook, basis, ...rest } = q as any;
     if (twist) console.log(`[作問メモ] 元: ${originalContent} / テーマ: ${learningTheme} / 変更: ${twist}`);
-    if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook}`);
+    if (quizStyle) console.log(`[作問メモ] 問${i + 1} スタイル: ${quizStyle} / ポイント: ${hook} / 根拠: ${basis}`);
     // AIは正解を前の方に置きがちなので、選択肢の並びをシャッフルする
     return { ...shuffleOptions(rest as QuizQuestion), id: `q-${i}-${now}` };
   });
@@ -549,7 +552,9 @@ ${styleLines}
 ■ 各問題の作り方（出力の項目もこの順に書く）
   1. quizStyle: 割り当てられたスタイル名をそのまま書き写す。
   2. hook: この問題の「へえ！」ポイント（答えを知ったときに驚く・笑う理由）を一言で書く。そのスタイルで面白い問題になる題材が見つからなければ、別の画像の題材に変える（スタイルは変えない）。
-  3. question 以降: quizStyle と hook を反映した問題を作る。
+  3. basis: 正解が正しいと言える根拠を書く。事実なら教科書・辞書にのっている事実、なぞなぞなら言葉の仕掛け。
+     書いてみて根拠があやふやだったり、問題文の説明が正解に当てはまらなかったりしたら、その題材はやめて別の題材にする（スタイルは変えない）。
+  4. question 以降: quizStyle・hook・basis を反映した問題を作る。問題文には basis で確かめたことだけを書き、それ以外の思いつきの説明（漢字の成り立ち・部品の名前など）を足さない。
 
 ■ 面白くするコツ
   - 題材は教材で学んでいる中身（漢字ドリルなら漢字・言葉、計算ドリルなら数や計算、理科なら生き物やしくみ）から選ぶ。問題番号やページなど紙面の作りは題材にしない。
