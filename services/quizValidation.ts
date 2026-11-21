@@ -334,6 +334,13 @@ export const sanitizeQuestions = (
   return pickVaried(usable, total)
     .map((q: any) => ({
       ...q,
-      explanation: typeof q.explanation === 'string' ? q.explanation : '',
+      question: fixSentenceEnd(q.question),
+      explanation: typeof q.explanation === 'string' ? fixSentenceEnd(q.explanation) : '',
     }));
 };
+
+/**
+ * 日本語の文末が半角の「.」になっていたら「。」に直す（軽量モデルがときどき書く。例:「何というか.」）。
+ * 「3.14」「Mr.」のように、英数字の後ろの「.」はそのままにする
+ */
+export const fixSentenceEnd = (s: string): string => s.replace(/([^\x00-\x7F])\.(?=\s|$)/g, '$1。');

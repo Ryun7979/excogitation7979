@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -253,4 +253,18 @@ test('pickVaried: ほかの型が無ければ同じ型のまま total 問にす�
   const calc = Array.from({ length: 12 }, (_, i) => ({ question: `${i} + 1 はいくつ？` }));
   assert.equal(pickVaried(calc, 10).length, 10);
   assert.deepEqual(pickVaried(calc.slice(0, 9), 10), calc.slice(0, 9));
+});
+
+test('fixSentenceEnd: 日本語の文末の「.」を「。」に直し、英数字の「.」はそのまま', () => {
+  assert.equal(fixSentenceEnd('りんごの生産量が日本一の都道府県はどれか.'), 'りんごの生産量が日本一の都道府県はどれか。');
+  assert.equal(fixSentenceEnd('季節風という. 夏にふく。'), '季節風という。 夏にふく。');
+  assert.equal(fixSentenceEnd('円周率は3.14です。'), '円周率は3.14です。');
+  assert.equal(fixSentenceEnd('答えは 3.'), '答えは 3.');
+  assert.equal(fixSentenceEnd('Mr. Smith は先生です'), 'Mr. Smith は先生です');
+});
+
+test('sanitizeQuestions: 問題文と解説の文末の「.」を直す', () => {
+  const [q] = sanitizeQuestions([{ ...valid(1), question: '日本一高い山はどれか.', explanation: '富士山です.' }], 10);
+  assert.equal(q.question, '日本一高い山はどれか。');
+  assert.equal(q.explanation, '富士山です。');
 });

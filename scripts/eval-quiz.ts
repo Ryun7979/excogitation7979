@@ -92,7 +92,7 @@ const CHECKS = {
   answerCorrect: '正解とされている選択肢が本当に正しい',
   uniqueAnswer: '正しい選択肢がちょうど1つ（ほかの3つははっきりまちがい）',
   selfContained: '教材や画像を見なくても、問題文と選択肢だけで解ける',
-  noTypos: '選択肢・問題文に誤字や、実在しない言葉の書きまちがいがない（表記を問う問題のわざとの誤字は除く）',
+  noTypos: '選択肢・問題文に誤字や、実在しない言葉の書きまちがいがない（表記を問う問題のわざとの誤字と、「〜を使った熟語はどれ？」などで不正解をわざと実在しない言葉にしたものは除く）',
   naturalJapanese: '問題文が自然な日本語で、言い過ぎ（「すぐに」「必ず」など教科書にない強調）がない',
   notCopied: '（あまの先生のみ）教材の問題をそのまま写していない。それ以外のモードは常に true',
 } as const;
@@ -144,22 +144,30 @@ interface RunResult {
   dropped: Record<string, number>;
   kept: number;
   judged: { question: string; options: string[]; correct: string; kind: string; checks: Record<CheckKey, boolean>; comment: string }[];
+  /** コードの検証で捨てた問題（形が壊れたものは除く）。どの問題がなぜ捨てられたかを見るため */
+  droppedQuestions: { reason: string; question: string; options: string[]; correct: string }[];
   error?: string;
 }
 
 const countDrops = (raw: any[]) => {
   const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, conditionMismatch: 0, duplicateOrExtra: 0 };
+  const droppedQuestions: RunResult['droppedQuestions'] = [];
   const reconciled = raw.map(reconcileAnswer);
   for (const q of reconciled) {
+    let reason: keyof typeof drops | null = null;
     if (!q || !isPlayableQuestion(q)) drops.notPlayable++;
-    else if (refersToMaterial(q)) drops.materialRef++;
-    else if (copiesOriginal(q)) drops.copied++;
-    else if (revealsAnswer(q)) drops.revealsAnswer++;
-    else if (violatesCondition(q)) drops.conditionMismatch++;
+    else if (refersToMaterial(q)) reason = 'materialRef';
+    else if (copiesOriginal(q)) reason = 'copied';
+    else if (revealsAnswer(q)) reason = 'revealsAnswer';
+    else if (violatesCondition(q)) reason = 'conditionMismatch';
+    if (reason) {
+      drops[reason]++;
+      droppedQuestions.push({ reason, question: q.question, options: q.options, correct: q.options[q.correctAnswerIndex] });
+    }
   }
   const kept = sanitizeQuestions(raw, GENERATION_COUNT).length;
   drops.duplicateOrExtra = raw.length - kept - drops.notPlayable - drops.materialRef - drops.copied - drops.revealsAnswer - drops.conditionMismatch;
-  return { drops, kept };
+  return { drops, kept, droppedQuestions };
 };
 
 const results: RunResult[] = [];
@@ -191,13 +199,13 @@ for (let round = 1; round <= repeat; round++) {
             config: { responseMimeType: 'application/json', responseSchema: buildQuizSchema(mode, teacher) as any, ...thinkingFor(model) },
           });
           const raw = JSON.parse(res.text || '[]');
-          const { drops, kept } = countDrops(Array.isArray(raw) ? raw : []);
+          const { drops, kept, droppedQuestions } = countDrops(Array.isArray(raw) ? raw : []);
           const playable = sanitizeQuestions(raw, TOTAL_QUESTIONS);
           const verdicts = await judge(playable, material, modeKey);
           results.push({
             modeKey, model, round, batch: b, ms,
             generated: Array.isArray(raw) ? raw.length : 0,
-            dropped: drops, kept,
+            dropped: drops, kept, droppedQuestions,
             judged: playable.map((q, i) => {
               const v = verdicts.find(x => x.index === i);
               return {
@@ -213,7 +221,7 @@ for (let round = 1; round <= repeat; round++) {
           console.log(`${(ms / 1000).toFixed(1)}秒 / 使える問題 ${kept}/${GENERATION_COUNT}`);
         } catch (e) {
           console.log(`失敗: ${(e as Error).message}`);
-          results.push({ modeKey, model, round, batch: b, ms: 0, generated: 0, dropped: {}, kept: 0, judged: [], error: String((e as Error).message) });
+          results.push({ modeKey, model, round, batch: b, ms: 0, generated: 0, dropped: {}, kept: 0, judged: [], droppedQuestions: [], error: String((e as Error).message) });
         }
       }
     }
@@ -229,7 +237,8 @@ for (const r of results) {
 }
 
 const checkKeys = Object.keys(CHECKS) as CheckKey[];
-// 同じ型の問題の多さ: 1回のクイズ（10問）で、いちばん多い問い方（読み・書き・意味・英語・計算）が何問あったか
+// 同じ型の問題の多さ: 1回のクイズ（10問）で、いちばん多い問い方（読み・書き・意味・英語・計算）が何問あったか。
+// 問題が1問も残らなかった回は平均に入れない（0% として数えると低く見えるため）
 const kindCounts = (judged: { kind: string }[]) => {
   const counts: Record<string, number> = {};
   judged.forEach(j => { counts[j.kind] = (counts[j.kind] ?? 0) + 1; });
@@ -251,7 +260,7 @@ const rows = [...groups.entries()].map(([key, rs]) => {
     ok.length ? (ok.reduce((s, r) => s + r.kept, 0) / ok.length).toFixed(1) : '-',
     ...checkKeys.map(k => pct(judged.filter(j => j.checks[k]).length, judged.length)),
     pct(judged.filter(j => checkKeys.every(k => j.checks[k])).length, judged.length),
-    ok.length ? `${Math.round((ok.reduce((s, r) => s + topKindShare(r.judged), 0) / ok.length) * 100)}%` : '-',
+    (() => { const withQ = ok.filter(r => r.judged.length > 0); return withQ.length ? `${Math.round((withQ.reduce((s, r) => s + topKindShare(r.judged), 0) / withQ.length) * 100)}%` : '-'; })(),
   ];
 });
 
@@ -285,6 +294,10 @@ ${[...groups.entries()].map(([key, rs]) => {
 ## 問い方の内訳（合計）
 
 ${[...groups.entries()].map(([key, rs]) => `- ${key.replace('|', ' / ')}: ${Object.entries(kindCounts(rs.flatMap(r => r.judged))).map(([k, v]) => `${k} ${v}`).join('、') || '-'}`).join('\n')}
+
+## コードの検証で捨てた問題
+
+${results.flatMap(r => r.droppedQuestions.map(d => `- **${r.model} / ${r.modeKey}** [${d.reason}]: ${d.question}（正解: ${d.correct}）`)).join('\n') || 'なし'}
 
 ## 不合格だった問題
 
