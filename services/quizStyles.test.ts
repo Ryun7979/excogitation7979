@@ -20,6 +20,11 @@ test('QUIZ_STYLES: なぞなぞは含まず、10問分のスタイル数があ�
   assert.ok(QUIZ_STYLES.length >= 10);
 });
 
+test('QUIZ_STYLES: 例は【題材】の形だけで、具体的な題材を書かない', () => {
+  // 具体例を書くと、教材と無関係にその例がそのまま出題されるため
+  for (const s of QUIZ_STYLES) assert.ok(s.example.includes('【題材'), s.name);
+});
+
 test('assignQuizStyles: 毎回順番が変わる', () => {
   const runs = new Set(Array.from({ length: 10 }, () => assignQuizStyles(10).map(s => s.name).join()));
   assert.ok(runs.size > 1);
