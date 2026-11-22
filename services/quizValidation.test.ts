@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd, hasLookalikeOption, stripMaterialMention } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesKanjiWriting, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd, hasLookalikeOption, stripMaterialMention } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -203,6 +203,13 @@ test('violatesKanjiCondition: 否定の問い・読みや意味を問う問題�
   assert.equal(violatesKanjiCondition(q4('『海』を使った「海原」の意味は？', ['広い海', '高い山', '長い川', '深い森'], 0)), false);
   assert.equal(violatesKanjiCondition(q4('『氵』を使った漢字はどれ？（部首）', ['池', '林', '花', '空'], 0)), false);
   assert.equal(violatesKanjiCondition(q4('『海』を使った言葉はどれ？', ['うみべ', 'やまみち', 'かわら', 'もり'], 0)), false);
+});
+
+test('violatesKanjiWriting: 「漢字で書くと？」なのに正解に漢字がなければ捨てる', () => {
+  assert.equal(violatesKanjiWriting(q4('1853年に来航した人物の名前を漢字で書くとどれか選びなさい。', ['ペリー', 'コロンブス', 'マゼラン', 'クック'], 0)), true);
+  assert.equal(violatesKanjiWriting(q4('「りんご」を英語で書くと？', ['apple', 'orange', 'grape', 'peach'], 0)), false);
+  assert.equal(violatesKanjiWriting(q4('「こくみんのぜいきん」を漢字で書くとどれ？', ['国民の税金', '国民の説金', '国民の税近', '国民の脱金'], 0)), false);
+  assert.equal(violatesKanjiWriting(q4('「まわりのようす」を表す正しい漢字はどれ？', ['周囲', '週囲', '周位', '州囲'], 0)), false);
 });
 
 test('evaluateArithmetic: 四則演算とかっこ・全角・記号のゆれ', () => {

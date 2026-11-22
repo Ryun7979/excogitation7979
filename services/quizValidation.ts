@@ -129,6 +129,17 @@ export const violatesKanjiCondition = (q: any): boolean => {
   return [...question.matchAll(KANJI_CONDITION)].some(m => !correct.includes(m[1]));
 };
 
+// 「漢字で書くと？」「正しい漢字はどれ？」と、漢字の書き方を問う問い
+const ASKS_KANJI_WRITING = /漢字で(?:書|かく|かい|かけ|表)|かんじで(?:書|かく|かい)|正しい漢字|漢字の(?:書き方|組み合わせ)/;
+
+/**
+ * 漢字の書き方を問うのに、正解に漢字が1字もないか（すなお先生の問い方【書き】を、
+ * 人名のカタカナや英語にも当てはめてしまう。例:「来航した人物の名前を漢字で書くと？（正解: ペリー）」）。
+ */
+export const violatesKanjiWriting = (q: any): boolean =>
+  ASKS_KANJI_WRITING.test(String(q.question).normalize('NFKC')) &&
+  !HAS_KANJI.test(String(q.options[q.correctAnswerIndex]).normalize('NFKC'));
+
 // 計算式の読み取り: 全角・マイナス記号のゆれをそろえる
 const toAsciiMath = (s: string): string =>
   s.normalize('NFKC').replace(/[−–]/g, '-').replace(/×/g, '*').replace(/÷/g, '/');
@@ -224,7 +235,7 @@ export const violatesArithmetic = (q: any): boolean => {
 };
 
 /** 問題文の条件（「『X』を使った」「答えが N になる」など）と正解が合わないか */
-export const violatesCondition = (q: any): boolean => violatesKanjiCondition(q) || violatesArithmetic(q);
+export const violatesCondition = (q: any): boolean => violatesKanjiCondition(q) || violatesKanjiWriting(q) || violatesArithmetic(q);
 
 // ---------- 正解と1字ちがいのにせもの選択肢 ----------
 

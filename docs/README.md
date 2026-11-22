@@ -4,6 +4,7 @@
 
 | 場所 | 中身 |
 | --- | --- |
+| [handover.md](handover.md) | **引継ぎ資料**: 残っている作業・Gemini の無料枠の制限・確かめていないこと |
 | [tasks/](tasks/README.md) | 改善タスクの一覧と、タスクごとの経過記録 |
 | [ui-audit.md](ui-audit.md) | UI・デザイン・画面サイズまわりの問題点の洗い出し |
 | [deploy.md](deploy.md) | 動かし方・公開のしかた（APIキーの置き場所など） |
