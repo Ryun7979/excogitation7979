@@ -15,7 +15,7 @@ import { join, extname } from 'node:path';
 import { GameMode, TeacherType, TOTAL_QUESTIONS } from '../types';
 import { FALLBACK_MODELS, Type } from '../services/aiModels';
 import { GENERATION_COUNT, analysisSchema, buildAnalysisPrompt, buildQuizPrompt, buildQuizSchema } from '../services/quizPrompts';
-import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer, violatesCondition, hasLookalikeOption, questionKind, pickVaried } from '../services/quizValidation';
+import { sanitizeQuestions, reconcileAnswer, isPlayableQuestion, refersToMaterial, copiesOriginal, revealsAnswer, violatesCondition, hasLookalikeOption, stripMaterialMention, questionKind, pickVaried } from '../services/quizValidation';
 import { answerCheckSchema, buildAnswerCheckPrompt, parseAnswerVerdicts, answerCheckProblem } from '../services/answerCheck';
 
 // ---------- 設定 ----------
@@ -161,7 +161,7 @@ interface RunResult {
 const countDrops = (raw: any[]) => {
   const drops = { notPlayable: 0, materialRef: 0, copied: 0, revealsAnswer: 0, conditionMismatch: 0, lookalike: 0, duplicateOrExtra: 0 };
   const droppedQuestions: RunResult['droppedQuestions'] = [];
-  const reconciled = raw.map(reconcileAnswer);
+  const reconciled = raw.map(reconcileAnswer).map(stripMaterialMention);
   for (const q of reconciled) {
     let reason: keyof typeof drops | null = null;
     if (!q || !isPlayableQuestion(q)) drops.notPlayable++;

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd, hasLookalikeOption } from './quizValidation.ts';
+import { sanitizeQuestions, isPlayableQuestion, shuffleOptions, reconcileAnswer, refersToMaterial, copiesOriginal, revealsAnswer, violatesKanjiCondition, violatesArithmetic, evaluateArithmetic, questionKind, pickVaried, fixSentenceEnd, hasLookalikeOption, stripMaterialMention } from './quizValidation.ts';
 
 const valid = (n: number) => ({
   question: `問題${n}`,
@@ -59,6 +59,21 @@ test('教材そのものを指す問題は除外される', () => {
   // カタカナ語の一部としての「ワーク」は対象外
   assert.equal(refersToMaterial(q('チームワークの意味はどれ？')), false);
   assert.equal(sanitizeQuestions([q('教材に出てくる色はどれ？'), q('黄色はどれ？')], 10).length, 1);
+});
+
+test('stripMaterialMention: 教材を指す飾りの言い方だけを取り去り、教材の中身を当てさせる問題はそのまま', () => {
+  const s = (question: string) => stripMaterialMention({ ...valid(1), question }).question;
+  assert.equal(s('漢字ドリルに載っている次の4つの言葉のうち、なかまはずれはどれ？'), '次の4つの言葉のうち、なかまはずれはどれ？');
+  assert.equal(s('漢字ドリルに登場する言葉「益虫」は、どんな意味？'), '言葉「益虫」は、どんな意味？');
+  assert.equal(s('次の3つのヒントにすべて当てはまる、漢字ドリルに載っている言葉はどれ？'), '次の3つのヒントにすべて当てはまる言葉はどれ？');
+  assert.equal(s('漢字ドリルに出てくる次の4つの文のなかで、なかまはずれはどれ？'), '次の4つの文のなかで、なかまはずれはどれ？');
+  assert.equal(s('漢字・語句ドリルに載っている「周囲」という言葉の、正しい意味はどれ？'), '「周囲」という言葉の、正しい意味はどれ？');
+  assert.equal(s('漢字ドリルに出てきた次の4つの言葉のうち、なかまはずれはどれ？'), '次の4つの言葉のうち、なかまはずれはどれ？');
+  assert.equal(s('ヒントに当てはまる漢字ドリルに載っている言葉はどれ？'), 'ヒントに当てはまる言葉はどれ？');
+  assert.equal(s('教材に出てくる色はどれ？'), '教材に出てくる色はどれ？');
+  assert.equal(s('ドリルで練習する漢字はどれ？'), 'ドリルで練習する漢字はどれ？');
+  // 取り去ったあとの問題は捨てられない
+  assert.equal(sanitizeQuestions([{ ...valid(1), question: '漢字ドリルに載っている言葉の中で、魚を売り買いする場所はどれ？' }], 10).length, 1);
 });
 
 test('正解と選択肢が同じ重複問題は1つだけ残る', () => {

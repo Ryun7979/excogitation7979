@@ -37,6 +37,20 @@ const MATERIAL_REFERENCE = /(?<![ァ-ヶー])ワーク|ドリル|教材|プリ�
 export const refersToMaterial = (q: any): boolean =>
   typeof q?.question === 'string' && MATERIAL_REFERENCE.test(q.question);
 
+// 「漢字ドリルに載っている次の4つの言葉のうち〜」のように、教材を指す言葉が飾りとして付いているだけの言い方。
+// 取り去っても問題として成り立つので、捨てずに取り去る（クイズモードで多く、捨てると10問に届かなくなる）。
+// 「ドリルで練習する漢字はどれ？」のように教材の中身を当てさせる問題は、ここに当てはまらないので捨てられる
+const MATERIAL_MENTION = /(?:この)?(?:ことば)?[一-龥・]{0,6}(?:(?<![ァ-ヶー])ワーク|ドリル|教材|プリント)(?:の中)?(?:に|で)(?:載っている|のっている|登場する|出てくる|でてくる|出てきた|でてきた|出ている|ある)/g;
+
+/** 教材を指す飾りの言い方を問題文から取り去る（「当てはまる、ドリルに載っている言葉」→「当てはまる言葉」） */
+export const stripMaterialMention = (q: any): any => {
+  if (q == null || typeof q.question !== 'string') return q;
+  // 取り去るのは、あとに「次の〜」「言葉〜」「「X」という〜」が続くときだけ（「教材に出てくる色はどれ？」は取り去ると意味がなくなるので捨てる）。
+  // 「当てはまる、」のように、直前が「〜る、」「〜た、」なら「、」も消す
+  const question = q.question.replace(new RegExp(`(?:(?<=[るたい])、)?${MATERIAL_MENTION.source}(?=次の|言葉|「)`, 'g'), '');
+  return question === q.question ? q : { ...q, question };
+};
+
 // 丸写し判定用の正規化: 全角/半角・空白・記号のゆれをなくす
 const normalizeForCopy = (s: string): string =>
   s.normalize('NFKC').replace(/[\s=＝?？。、,.「」『』()（）□]/g, '').replace(/[x*]/g, '×');
@@ -343,6 +357,7 @@ export const sanitizeQuestions = (
   const seenQuestions = new Set<string>();
   const usable = data
     .map(reconcileAnswer)
+    .map(stripMaterialMention)
     .filter(isPlayableQuestion)
     .filter(q => !refersToMaterial(q))
     .filter(q => !copiesOriginal(q))
