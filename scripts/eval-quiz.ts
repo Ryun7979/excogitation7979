@@ -181,18 +181,31 @@ const countDrops = (raw: any[]) => {
 };
 
 const results: RunResult[] = [];
-for (let round = 1; round <= repeat; round++) {
+// 1日の上限に当たったら、その先は全部失敗するので打ち切り、それまでの結果だけ保存する
+let stoppedBy = '';
+const isDailyLimit = (e: unknown) => /PerDay|per day/i.test(String((e as Error)?.message ?? e));
+const quotaModel = (e: unknown) => String((e as Error)?.message ?? e).match(/model: ([\w.-]+)/)?.[1] ?? '?';
+rounds: for (let round = 1; round <= repeat; round++) {
   for (const model of models) {
     // 学習内容の書き出しはモデルごとに1回（モードは関係ない）
     const analyses: string[][] = [];
-    for (const batch of batches) {
-      const { res } = await generate({
-        model,
-        contents: { parts: [...batch.map(i => imageParts[i]), { text: buildAnalysisPrompt(batch.length) }] },
-        config: { responseMimeType: 'application/json', responseSchema: analysisSchema as any, ...thinkingFor(model) },
-      });
-      const data = JSON.parse(res.text || '[]');
-      analyses.push(batch.map((_, pos) => `教材の種類: ${data[pos]?.materialType ?? '?'}\n${data[pos]?.summary ?? ''}`));
+    try {
+      for (const batch of batches) {
+        const { res } = await generate({
+          model,
+          contents: { parts: [...batch.map(i => imageParts[i]), { text: buildAnalysisPrompt(batch.length) }] },
+          config: { responseMimeType: 'application/json', responseSchema: analysisSchema as any, ...thinkingFor(model) },
+        });
+        const data = JSON.parse(res.text || '[]');
+        analyses.push(batch.map((_, pos) => `教材の種類: ${data[pos]?.materialType ?? '?'}\n${data[pos]?.summary ?? ''}`));
+      }
+    } catch (e) {
+      if (isDailyLimit(e)) {
+        stoppedBy = `${round}回目の ${model} の書き出しで、${quotaModel(e)} の1日の上限に当たった`;
+        break rounds;
+      }
+      console.log(`${model} / ${round}回目: 書き出しに失敗したので飛ばす: ${(e as Error).message.slice(0, 120)}`);
+      continue;
     }
 
     for (const modeKey of modeKeys) {
@@ -252,6 +265,11 @@ for (let round = 1; round <= repeat; round++) {
           });
           console.log(`${(ms / 1000).toFixed(1)}秒＋答え合わせ${(checkMs / 1000).toFixed(1)}秒 / コードの検証後 ${kept}/${GENERATION_COUNT} / 答え合わせ後 ${problems.filter(p => !p).length}${checkVerdicts ? '' : '（答え合わせなし）'}`);
         } catch (e) {
+          if (isDailyLimit(e)) {
+            console.log(`1日の上限（${quotaModel(e)}）`);
+            stoppedBy = `${label} で、${quotaModel(e)} の1日の上限に当たった`;
+            break rounds;
+          }
           console.log(`失敗: ${(e as Error).message}`);
           results.push({ modeKey, model, round, batch: b, ms: 0, checkMs: 0, generated: 0, dropped: {}, kept: 0, judged: [], droppedQuestions: [], checked: false, error: String((e as Error).message) });
         }
@@ -320,7 +338,7 @@ const md = `# 問題の質の評価 ${stamp}
 - 画像: ${imageFiles.length}枚（${imageDir}）
 - 採点モデル: ${judgeModel}
 - 答え合わせのモデル: ${checkerModel}
-- 回数: ${repeat}
+- 回数: ${repeat}${stoppedBy ? `\n- **途中で打ち切った**: ${stoppedBy}。それまでの結果だけを集計した` : ''}
 
 ## 集計
 
@@ -358,5 +376,5 @@ ${results.some(r => r.error) ? `## 失敗した実行\n\n${results.filter(r => r
 
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, `${stamp}.md`), md);
-writeFileSync(join(outDir, `${stamp}.json`), JSON.stringify({ stamp, judgeModel, checkerModel, images: imageFiles, results }, null, 2));
+writeFileSync(join(outDir, `${stamp}.json`), JSON.stringify({ stamp, judgeModel, checkerModel, images: imageFiles, stoppedBy, results }, null, 2));
 console.log(`\n結果: ${join(outDir, `${stamp}.md`)}`);
